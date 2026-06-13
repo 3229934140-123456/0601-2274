@@ -17,15 +17,22 @@ import {
   Target,
   CheckCircle,
   Users,
+  XCircle,
+  MapPin,
 } from 'lucide-react';
-import { getReportsByRole } from '../../data/mockData';
+import { getReportsByRole, getCommunityById, communities } from '../../data/mockData';
 import LineChart from '../../components/charts/LineChart';
-import { cn, formatPercent, formatNumber, formatDate } from '../../utils/format';
+import { cn, formatPercent, formatNumber, formatDate, getWarningStatusName, getWarningTypeName, getWarningLevelName } from '../../utils/format';
 import { useAuth } from '../../context/AuthContext';
+import { useAppStore } from '../../store';
 
 export default function Reports() {
   const { user } = useAuth();
   const [selectedReportIndex, setSelectedReportIndex] = useState(0);
+  const [selectedCommunityId, setSelectedCommunityId] = useState<string | null>(null);
+  const [selectedBatchIdx, setSelectedBatchIdx] = useState<number | null>(null);
+  const warnings = useAppStore((state) => state.warnings);
+  const allocationPlan = useAppStore((state) => state.allocationPlan);
 
   const weeklyReports = useMemo(() => {
     if (!user) return [];
@@ -34,13 +41,41 @@ export default function Reports() {
 
   const currentReport = weeklyReports[selectedReportIndex];
 
+  const visibleCommunities = useMemo(() => {
+    if (!user) return communities;
+    if (user.role === 'national' || user.role === 'provincial' || user.role === 'municipal') {
+      return communities;
+    }
+    if (user.role === 'district') {
+      return communities.filter(c => c.district?.includes('朝阳'));
+    }
+    if (user.role === 'property') {
+      return communities.filter(c => c.id === user.regionId);
+    }
+    return communities;
+  }, [user]);
+
+  const communityWarnings = useMemo(() => {
+    if (!selectedCommunityId) return [];
+    return warnings.filter(w => w.communityId === selectedCommunityId);
+  }, [warnings, selectedCommunityId]);
+
+  const communityData = useMemo(() => {
+    if (!selectedCommunityId) return null;
+    return getCommunityById(selectedCommunityId);
+  }, [selectedCommunityId]);
+
+  const planBatches = useMemo(() => {
+    return allocationPlan?.batches || [];
+  }, [allocationPlan]);
+
   const trendData = useMemo(() => {
     return weeklyReports.slice(0, 8).reverse().map(r => ({
       date: `第${r.weekNumber}周`,
       value: r.vacancyRate,
       name: '空置率',
     }));
-  }, []);
+  }, [weeklyReports]);
 
   const rentTrendData = useMemo(() => {
     return weeklyReports.slice(0, 8).reverse().map(r => ({
@@ -48,7 +83,7 @@ export default function Reports() {
       value: r.rentCollectionRate,
       name: '租金收缴率',
     }));
-  }, []);
+  }, [weeklyReports]);
 
   const waitDaysTrendData = useMemo(() => {
     return weeklyReports.slice(0, 8).reverse().map(r => ({
@@ -56,7 +91,20 @@ export default function Reports() {
       value: r.avgWaitDays,
       name: '轮候天数',
     }));
-  }, []);
+  }, [weeklyReports]);
+
+  const warningTrendData = useMemo(() => {
+    return weeklyReports.slice(0, 8).reverse().map((r, i) => ({
+      date: `第${r.weekNumber}周`,
+      value: selectedCommunityId
+        ? communityWarnings.filter(w => {
+            const triggerWeek = Math.floor((new Date(w.triggerDate).getTime() - new Date(r.startDate).getTime()) / (7 * 24 * 60 * 60 * 1000));
+            return triggerWeek <= 0;
+          }).length
+        : Math.floor(Math.abs(r.vacancyRate - 5) * 2),
+      name: '预警数',
+    }));
+  }, [weeklyReports, selectedCommunityId, communityWarnings]);
 
   const getChangeColor = (value: number, lowerIsBetter = false) => {
     if (value > 0) return lowerIsBetter ? 'text-red-400' : 'text-green-400';
@@ -141,7 +189,7 @@ export default function Reports() {
         <div>
           <h2 className="text-2xl font-bold text-white">{getReportScopeName()}运营健康报告</h2>
           <p className="text-dark-400 text-sm mt-1">
-            每周自动生成{getReportScopeName()}运营健康报告，提供数据分析与优化建议
+            每周自动生成{getReportScopeName()}运营健康报告，联动预警与分配计划
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -171,6 +219,43 @@ export default function Reports() {
         </div>
       </div>
 
+      <div className="glass-card p-4">
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-dark-400">聚焦维度：</span>
+          <select
+            value={selectedCommunityId || ''}
+            onChange={e => setSelectedCommunityId(e.target.value || null)}
+            className="px-3 py-1.5 bg-dark-700 border border-dark-600 rounded-lg text-sm text-dark-200 focus:outline-none focus:border-primary-500"
+          >
+            <option value="">全局概览</option>
+            {visibleCommunities.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          {planBatches.length > 0 && (
+            <select
+              value={selectedBatchIdx !== null ? String(selectedBatchIdx) : ''}
+              onChange={e => setSelectedBatchIdx(e.target.value !== '' ? parseInt(e.target.value) : null)}
+              className="px-3 py-1.5 bg-dark-700 border border-dark-600 rounded-lg text-sm text-dark-200 focus:outline-none focus:border-primary-500"
+            >
+              <option value="">全部批次</option>
+              {planBatches.map((b, i) => (
+                <option key={i} value={i}>第{b.batchNumber}批 · {b.releaseDate ? formatDate(b.releaseDate) : '待定'}</option>
+              ))}
+            </select>
+          )}
+          {(selectedCommunityId || selectedBatchIdx !== null) && (
+            <button
+              className="text-xs text-dark-400 hover:text-primary-400 flex items-center gap-1"
+              onClick={() => { setSelectedCommunityId(null); setSelectedBatchIdx(null); }}
+            >
+              <XCircle className="w-3 h-3" />
+              清除筛选
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="glass-card p-5">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-12 h-12 rounded-xl bg-gradient-primary flex items-center justify-center">
@@ -179,6 +264,7 @@ export default function Reports() {
           <div>
             <h3 className="text-lg font-semibold text-white">
               {currentReport.year}年第{currentReport.weekNumber}周运营健康报告
+              {communityData && ` · ${communityData.name}`}
             </h3>
             <p className="text-sm text-dark-400">
               报告周期：{currentReport.startDate} 至 {currentReport.endDate}
@@ -188,8 +274,8 @@ export default function Reports() {
 
         <div className="grid grid-cols-4 gap-5">
           <StatCard
-            title="空置率"
-            value={currentReport.vacancyRate}
+            title={communityData ? `${communityData.name}空置率` : "空置率"}
+            value={communityData ? communityData.vacancyRate : currentReport.vacancyRate}
             change={currentReport.vacancyRateMoM}
             unit="%"
             icon={<Home className="w-5 h-5" />}
@@ -197,8 +283,8 @@ export default function Reports() {
             lowerIsBetter
           />
           <StatCard
-            title="租金收缴率"
-            value={currentReport.rentCollectionRate}
+            title={communityData ? `${communityData.name}租金收缴率` : "租金收缴率"}
+            value={communityData ? communityData.rentCollectionRate : currentReport.rentCollectionRate}
             change={currentReport.rentCollectionRateMoM}
             unit="%"
             icon={<DollarSign className="w-5 h-5" />}
@@ -215,7 +301,7 @@ export default function Reports() {
           />
           <StatCard
             title="住户满意度"
-            value={currentReport.satisfaction}
+            value={communityData ? communityData.satisfaction : currentReport.satisfaction}
             change={currentReport.satisfactionMoM}
             unit="分"
             icon={<Smile className="w-5 h-5" />}
@@ -225,25 +311,26 @@ export default function Reports() {
       </div>
 
       <div className="grid grid-cols-12 gap-5">
-        <div className="col-span-8 glass-card p-5">
+        <div className="col-span-6 glass-card p-5">
           <h3 className="section-title">空置率趋势</h3>
           <LineChart
             data={trendData}
-            height={250}
+            height={220}
             color="#FB8C00"
             showArea
             yAxisName="空置率(%)"
           />
         </div>
 
-        <div className="col-span-4 glass-card p-5">
-          <h3 className="section-title">同比变化</h3>
-          <div className="space-y-4">
-            <YoYItem label="空置率同比" value={currentReport.vacancyRateYoY} unit="%" lowerIsBetter />
-            <YoYItem label="租金收缴率同比" value={currentReport.rentCollectionRateYoY} unit="%" />
-            <YoYItem label="轮候时长同比" value={currentReport.avgWaitDaysYoY} unit="天" lowerIsBetter />
-            <YoYItem label="满意度同比" value={currentReport.satisfactionYoY} unit="分" />
-          </div>
+        <div className="col-span-6 glass-card p-5">
+          <h3 className="section-title">预警变化趋势</h3>
+          <LineChart
+            data={warningTrendData}
+            height={220}
+            color="#EF4444"
+            showArea
+            yAxisName="预警数"
+          />
         </div>
       </div>
 
@@ -270,6 +357,90 @@ export default function Reports() {
           />
         </div>
       </div>
+
+      {selectedCommunityId && communityWarnings.length > 0 && (
+        <div className="glass-card p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <AlertTriangle className="w-5 h-5 text-orange-400" />
+            <h3 className="text-lg font-semibold text-white">{communityData?.name}预警记录</h3>
+            <span className="tag tag-warning text-xs">{communityWarnings.length}条</span>
+          </div>
+          <div className="space-y-3">
+            {communityWarnings.map(w => (
+              <div key={w.id} className="p-3 bg-dark-800/50 rounded-lg border border-dark-700 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className={`tag ${w.level === 'level2' ? 'tag-danger' : 'tag-warning'}`}>
+                    {getWarningLevelName(w.level)}
+                  </span>
+                  <span className="tag tag-primary">{getWarningTypeName(w.type)}</span>
+                  <span className="text-sm text-dark-300">
+                    {getWarningStatusName(w.status)}
+                  </span>
+                </div>
+                <div className="text-xs text-dark-400">
+                  触发：{w.triggerDate} · 持续{w.processingDays}天
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {planBatches.length > 0 && (
+        <div className="glass-card p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Calendar className="w-5 h-5 text-primary-400" />
+            <h3 className="text-lg font-semibold text-white">年度计划投放节点</h3>
+          </div>
+          <div className="space-y-3">
+            {planBatches
+              .filter((_, idx) => selectedBatchIdx === null || idx === selectedBatchIdx)
+              .map(batch => {
+                const batchWarnings = selectedCommunityId
+                  ? communityWarnings.filter(w => {
+                      if (!batch.releaseDate) return false;
+                      const batchDate = new Date(batch.releaseDate);
+                      const triggerDate = new Date(w.triggerDate);
+                      return Math.abs(batchDate.getTime() - triggerDate.getTime()) < 30 * 24 * 60 * 60 * 1000;
+                    })
+                  : [];
+                return (
+                  <div key={batch.batchNumber} className="p-4 bg-dark-800/50 rounded-lg border border-dark-700">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium text-white">第{batch.batchNumber}批次</span>
+                        <span className="tag tag-primary">
+                          {batch.releaseDate ? formatDate(batch.releaseDate) : '待定'}
+                        </span>
+                        <span className="text-sm text-dark-300">{formatNumber(batch.units)}套</span>
+                      </div>
+                      {selectedCommunityId && communityData && (
+                        <div className="text-xs text-dark-400">
+                          {communityData.name}当前空置率：{formatPercent(communityData.vacancyRate)} · 
+                          收缴率：{formatPercent(communityData.rentCollectionRate)}
+                        </div>
+                      )}
+                    </div>
+                    {batchWarnings.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-dark-700">
+                        <div className="text-xs text-orange-400 mb-1">关联预警：</div>
+                        {batchWarnings.map(w => (
+                          <div key={w.id} className="text-xs text-dark-400 flex items-center gap-2">
+                            <AlertTriangle className="w-3 h-3 text-orange-400" />
+                            {getWarningLevelName(w.level)} · {getWarningTypeName(w.type)} · {getWarningStatusName(w.status)}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {selectedCommunityId && !communityData && (
+                      <div className="text-xs text-dark-500 mt-1">小区数据暂无</div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-12 gap-5">
         <div className="col-span-7 glass-card p-5">
@@ -326,11 +497,11 @@ export default function Reports() {
         <h3 className="section-title">健康度评分</h3>
         <div className="grid grid-cols-5 gap-4">
           {[
-            { name: '分配效率', score: 78, color: 'primary' },
-            { name: '空置控制', score: 85, color: 'success' },
-            { name: '租金管理', score: 82, color: 'info' },
-            { name: '服务质量', score: 75, color: 'warning' },
-            { name: '综合评分', score: 80, color: 'primary' },
+            { name: '分配效率', score: communityData ? Math.round(communityData.allocationEfficiency) : 78, color: 'primary' },
+            { name: '空置控制', score: communityData ? Math.round(100 - communityData.vacancyRate * 3) : 85, color: 'success' },
+            { name: '租金管理', score: communityData ? Math.round(communityData.rentCollectionRate) : 82, color: 'info' },
+            { name: '服务质量', score: communityData ? Math.round(communityData.satisfaction) : 75, color: 'warning' },
+            { name: '综合评分', score: communityData ? Math.round((communityData.allocationEfficiency + (100 - communityData.vacancyRate * 3) + communityData.rentCollectionRate + communityData.satisfaction) / 4) : 80, color: 'primary' },
           ].map((item, index) => (
             <div key={index} className="text-center">
               <div className="relative w-24 h-24 mx-auto mb-3">

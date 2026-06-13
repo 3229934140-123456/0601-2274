@@ -489,6 +489,105 @@ export default function WarningDetail() {
           )}
         </div>
       )}
+
+      <div className="glass-card p-5">
+        <h3 className="section-title">处置记录</h3>
+        <div className="space-y-0">
+          <TimelineItem
+            icon={<AlertTriangle className="w-4 h-4" />}
+            color="warning"
+            title="预警触发"
+            date={warning.triggerDate}
+            description={`${warning.communityName} ${getWarningTypeName(warning.type)}指标触发${getWarningLevelName(warning.level)}`}
+          />
+          
+          {warning.status === 'processing' && (
+            <TimelineItem
+              icon={<Clock className="w-4 h-4" />}
+              color="primary"
+              title="开始处理"
+              date=""
+              description="已标记为处理中状态"
+            />
+          )}
+          
+          {warning.approvalHistory?.filter(h => h.status !== 'pending').map((h, idx) => (
+            <TimelineItem
+              key={idx}
+              icon={h.status === 'approved' ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+              color={h.status === 'approved' ? 'success' : 'danger'}
+              title={`${h.stageName} - ${h.status === 'approved' ? '通过' : '驳回'}`}
+              date={h.date}
+              handler={h.handler}
+              handlerRole={h.handlerRole}
+              description={h.opinion}
+            />
+          ))}
+          
+          {warning.status === 'resolved' && (
+            <TimelineItem
+              icon={<CheckCircle className="w-4 h-4" />}
+              color="success"
+              title="预警解除"
+              date=""
+              description="该预警已处理完成并解除"
+              isLast
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TimelineItem({ icon, color, title, date, handler, handlerRole, description, isLast }: {
+  icon: React.ReactNode;
+  color: 'primary' | 'success' | 'warning' | 'danger';
+  title: string;
+  date: string;
+  handler?: string;
+  handlerRole?: string;
+  description?: string;
+  isLast?: boolean;
+}) {
+  const dotColors = {
+    primary: 'bg-primary-500',
+    success: 'bg-green-500',
+    warning: 'bg-orange-500',
+    danger: 'bg-red-500',
+  };
+  const iconBgColors = {
+    primary: 'bg-primary-500/20 text-primary-400',
+    success: 'bg-green-500/20 text-green-400',
+    warning: 'bg-orange-500/20 text-orange-400',
+    danger: 'bg-red-500/20 text-red-400',
+  };
+
+  return (
+    <div className="flex gap-4">
+      <div className="flex flex-col items-center">
+        <div className={cn('w-8 h-8 rounded-full flex items-center justify-center', iconBgColors[color])}>
+          {icon}
+        </div>
+        {!isLast && <div className="w-0.5 flex-1 bg-dark-700 my-1" />}
+      </div>
+      <div className={cn('flex-1 pb-6', isLast && 'pb-0')}>
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-white">{title}</span>
+          {date && <span className="text-xs text-dark-400">{date}</span>}
+        </div>
+        {(handler || handlerRole) && (
+          <div className="flex items-center gap-3 mt-1">
+            {handler && <span className="text-xs text-dark-300">处理人：{handler}</span>}
+            {handlerRole && <span className="text-xs text-dark-500">({handlerRole})</span>}
+          </div>
+        )}
+        {description && (
+          <div className="mt-2 p-2 bg-dark-800/50 rounded text-sm text-dark-300">
+            {description}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

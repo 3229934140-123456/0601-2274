@@ -7,6 +7,7 @@ interface AppState {
   warnings: Warning[];
   allocationPlan: AllocationPlan;
   currentRole: UserRole;
+  planHistory: AllocationPlan[];
   setWarnings: (warnings: Warning[]) => void;
   updateWarning: (id: string, updates: Partial<Warning>) => void;
   setAllocationPlan: (plan: AllocationPlan) => void;
@@ -16,6 +17,9 @@ interface AppState {
   rejectWarning: (warningId: string, stage: number, opinion: string, handler: string) => void;
   resolveWarning: (warningId: string, report: string) => void;
   markWarningProcessing: (warningId: string) => void;
+  addPlanToHistory: (plan: AllocationPlan) => void;
+  removePlanFromHistory: (planId: string) => void;
+  clearPlanHistory: () => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -24,6 +28,7 @@ export const useAppStore = create<AppState>()(
       warnings: initialWarnings,
       allocationPlan: initialPlan,
       currentRole: 'municipal',
+      planHistory: [],
 
       setWarnings: (warnings) => set({ warnings }),
 
@@ -102,6 +107,26 @@ export const useAppStore = create<AppState>()(
           status: 'processing',
         });
       },
+
+      addPlanToHistory: (plan) => {
+        const currentHistory = get().planHistory;
+        const existing = currentHistory.findIndex(p => p.id === plan.id);
+        if (existing >= 0) {
+          const updated = [...currentHistory];
+          updated[existing] = plan;
+          set({ planHistory: updated });
+        } else {
+          set({ planHistory: [...currentHistory, plan].slice(-5) });
+        }
+      },
+
+      removePlanFromHistory: (planId) => {
+        set((state) => ({
+          planHistory: state.planHistory.filter(p => p.id !== planId),
+        }));
+      },
+
+      clearPlanHistory: () => set({ planHistory: [] }),
     }),
     {
       name: 'housing-security-app-storage',
@@ -109,6 +134,7 @@ export const useAppStore = create<AppState>()(
         warnings: state.warnings,
         allocationPlan: state.allocationPlan,
         currentRole: state.currentRole,
+        planHistory: state.planHistory,
       }),
     }
   )

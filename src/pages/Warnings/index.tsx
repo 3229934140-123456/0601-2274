@@ -8,15 +8,22 @@ import {
   CheckCircle,
   ArrowUpCircle,
   ChevronRight,
+  XCircle,
+  User,
+  Calendar,
+  FileText,
+  ClipboardList,
+  LayoutList,
+  LayoutGrid,
 } from 'lucide-react';
 import WarningCard from '../../components/WarningCard';
-import { cn, getWarningLevelName, getWarningStatusName, getWarningTypeName } from '../../utils/format';
+import { cn, getWarningLevelName, getWarningStatusName, getWarningTypeName, formatDate } from '../../utils/format';
 import type { WarningLevel, WarningStatus, WarningType } from '../../types';
 import { useAppStore } from '../../store';
 import { useAuth } from '../../context/AuthContext';
 import { getCommunityById } from '../../data/mockData';
 
-const levelFilters: { value: WarningLevel | 'all'; label: string; count?: number }[] = [
+const levelFilters: { value: WarningLevel | 'all'; label: string }[] = [
   { value: 'all', label: '全部' },
   { value: 'level1', label: '一级预警' },
   { value: 'level2', label: '二级预警' },
@@ -36,6 +43,21 @@ const typeFilters: { value: WarningType | 'all'; label: string }[] = [
   { value: 'rent', label: '租金收缴率低' },
 ];
 
+const resultFilters: { value: string; label: string }[] = [
+  { value: 'all', label: '全部结果' },
+  { value: 'approved', label: '审批通过' },
+  { value: 'rejected', label: '审批驳回' },
+  { value: 'resolved_report', label: '报告解除' },
+  { value: 'pending', label: '审批中' },
+];
+
+const stageFilters: { value: string; label: string }[] = [
+  { value: 'all', label: '全部阶段' },
+  { value: '1', label: '物业确认' },
+  { value: '2', label: '区中心复核' },
+  { value: '3', label: '市住建局批准' },
+];
+
 export default function Warnings() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -43,9 +65,13 @@ export default function Warnings() {
   const [levelFilter, setLevelFilter] = useState<WarningLevel | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<WarningStatus | 'all'>('all');
   const [typeFilter, setTypeFilter] = useState<WarningType | 'all'>('all');
+  const [resultFilter, setResultFilter] = useState('all');
+  const [stageFilter, setStageFilter] = useState('all');
+  const [handlerFilter, setHandlerFilter] = useState('');
   const [searchText, setSearchText] = useState('');
+  const [viewMode, setViewMode] = useState<'card' | 'ledger'>('card');
 
-  const filteredWarnings = useMemo(() => {
+  const roleFilteredWarnings = useMemo(() => {
     let result = storeWarnings;
 
     if (user?.role === 'district') {
@@ -59,29 +85,65 @@ export default function Warnings() {
       result = result.filter(w => w.communityId === user.regionId);
     }
 
-    return result.filter(w => {
+    return result;
+  }, [storeWarnings, user]);
+
+  const filteredWarnings = useMemo(() => {
+    return roleFilteredWarnings.filter(w => {
       if (levelFilter !== 'all' && w.level !== levelFilter) return false;
       if (statusFilter !== 'all' && w.status !== statusFilter) return false;
       if (typeFilter !== 'all' && w.type !== typeFilter) return false;
       if (searchText && !w.communityName.includes(searchText)) return false;
+
+      if (resultFilter !== 'all') {
+        if (resultFilter === 'approved') {
+          const hasApproved = w.approvalHistory?.some(h => h.status === 'approved');
+          if (!hasApproved) return false;
+        } else if (resultFilter === 'rejected') {
+          const hasRejected = w.approvalHistory?.some(h => h.status === 'rejected');
+          if (!hasRejected) return false;
+        } else if (resultFilter === 'resolved_report') {
+          if (w.status !== 'resolved') return false;
+          const hasApprovalStage = w.approvalHistory?.some(h => h.status !== 'pending');
+          if (hasApprovalStage) return false;
+        } else if (resultFilter === 'pending') {
+          const hasPending = w.approvalHistory?.some(h => h.status === 'pending');
+          if (!hasPending && !w.approvalStage) return false;
+        }
+      }
+
+      if (stageFilter !== 'all') {
+        const stage = parseInt(stageFilter);
+        const hasStage = w.approvalHistory && w.approvalHistory.length >= stage;
+        if (!hasStage) return false;
+      }
+
+      if (handlerFilter) {
+        const allHandlers = w.approvalHistory
+          ?.filter(h => h.status !== 'pending')
+          .map(h => h.handler)
+          .join(',') || '';
+        if (!allHandlers.includes(handlerFilter)) return false;
+      }
+
       return true;
     });
-  }, [storeWarnings, levelFilter, statusFilter, typeFilter, searchText, user]);
+  }, [roleFilteredWarnings, levelFilter, statusFilter, typeFilter, searchText, resultFilter, stageFilter, handlerFilter, user]);
+
+  const allHandlers = useMemo(() => {
+    const handlers = new Set<string>();
+    roleFilteredWarnings.forEach(w => {
+      w.approvalHistory?.forEach(h => {
+        if (h.status !== 'pending' && h.handler && h.handler !== '待审批' && h.handler !== '待复核') {
+          handlers.add(h.handler);
+        }
+      });
+    });
+    return Array.from(handlers);
+  }, [roleFilteredWarnings]);
 
   const stats = useMemo(() => {
-    let warnings = storeWarnings;
-    
-    if (user?.role === 'district') {
-      warnings = warnings.filter(w => {
-        const community = getCommunityById(w.communityId);
-        return community?.district === '朝阳区' || community?.district?.includes('朝阳');
-      });
-    }
-
-    if (user?.role === 'property') {
-      warnings = warnings.filter(w => w.communityId === user.regionId);
-    }
-
+    const warnings = roleFilteredWarnings;
     return {
       total: warnings.length,
       active: warnings.filter(w => w.status === 'active').length,
@@ -90,7 +152,26 @@ export default function Warnings() {
       level1: warnings.filter(w => w.level === 'level1' && w.status !== 'resolved').length,
       level2: warnings.filter(w => w.level === 'level2' && w.status !== 'resolved').length,
     };
-  }, [storeWarnings, user]);
+  }, [roleFilteredWarnings]);
+
+  const getDisposalResult = (w: typeof storeWarnings[0]) => {
+    if (w.status === 'resolved') {
+      const hasRejected = w.approvalHistory?.some(h => h.status === 'rejected');
+      if (hasRejected) return { label: '审批驳回', color: 'text-red-400', icon: XCircle };
+      const hasApproval = w.approvalHistory?.some(h => h.status === 'approved');
+      if (hasApproval) return { label: '审批通过', color: 'text-green-400', icon: CheckCircle };
+      return { label: '报告解除', color: 'text-cyan-400', icon: FileText };
+    }
+    if (w.status === 'escalated') return { label: '已升级', color: 'text-red-400', icon: ArrowUpCircle };
+    if (w.status === 'processing') return { label: '处理中', color: 'text-primary-400', icon: Clock };
+    return { label: '待处理', color: 'text-orange-400', icon: AlertTriangle };
+  };
+
+  const getCurrentStage = (w: typeof storeWarnings[0]) => {
+    if (!w.approvalStage) return '-';
+    const stageNames: Record<number, string> = { 1: '物业确认', 2: '区中心复核', 3: '市住建局批准' };
+    return stageNames[w.approvalStage] || '-';
+  };
 
   return (
     <div className="space-y-6 fade-in-up">
@@ -98,8 +179,28 @@ export default function Warnings() {
         <div>
           <h2 className="text-2xl font-bold text-white">预警管理</h2>
           <p className="text-dark-400 text-sm mt-1">
-            实时监控空置率和租金收缴率，自动触发分级预警
+            实时监控空置率和租金收缴率，自动触发分级预警，完整处置台账可追溯
           </p>
+        </div>
+        <div className="flex items-center gap-2 p-1 bg-dark-800 rounded-lg">
+          <button
+            onClick={() => setViewMode('card')}
+            className={cn(
+              'p-2 rounded-md transition-all',
+              viewMode === 'card' ? 'bg-primary-500 text-white' : 'text-dark-400 hover:text-white'
+            )}
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setViewMode('ledger')}
+            className={cn(
+              'p-2 rounded-md transition-all',
+              viewMode === 'ledger' ? 'bg-primary-500 text-white' : 'text-dark-400 hover:text-white'
+            )}
+          >
+            <ClipboardList className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
@@ -195,7 +296,7 @@ export default function Warnings() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <select
               value={typeFilter}
               onChange={e => setTypeFilter(e.target.value as any)}
@@ -214,6 +315,36 @@ export default function Warnings() {
                 <option key={f.value} value={f.value}>{f.label}</option>
               ))}
             </select>
+            <select
+              value={resultFilter}
+              onChange={e => setResultFilter(e.target.value)}
+              className="px-3 py-1.5 bg-dark-700 border border-dark-600 rounded-lg text-sm text-dark-200 focus:outline-none focus:border-primary-500"
+            >
+              {resultFilters.map(f => (
+                <option key={f.value} value={f.value}>{f.label}</option>
+              ))}
+            </select>
+            <select
+              value={stageFilter}
+              onChange={e => setStageFilter(e.target.value)}
+              className="px-3 py-1.5 bg-dark-700 border border-dark-600 rounded-lg text-sm text-dark-200 focus:outline-none focus:border-primary-500"
+            >
+              {stageFilters.map(f => (
+                <option key={f.value} value={f.value}>{f.label}</option>
+              ))}
+            </select>
+            {allHandlers.length > 0 && (
+              <select
+                value={handlerFilter}
+                onChange={e => setHandlerFilter(e.target.value)}
+                className="px-3 py-1.5 bg-dark-700 border border-dark-600 rounded-lg text-sm text-dark-200 focus:outline-none focus:border-primary-500"
+              >
+                <option value="">全部处理人</option>
+                {allHandlers.map(h => (
+                  <option key={h} value={h}>{h}</option>
+                ))}
+              </select>
+            )}
             <div className="relative">
               <Search className="w-4 h-4 text-dark-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
@@ -228,17 +359,89 @@ export default function Warnings() {
         </div>
       </div>
 
-      {filteredWarnings.length > 0 ? (
-        <div className="space-y-4">
-          {filteredWarnings.map(warning => (
-            <WarningCard key={warning.id} warning={warning} />
-          ))}
-        </div>
+      {viewMode === 'card' ? (
+        filteredWarnings.length > 0 ? (
+          <div className="space-y-4">
+            {filteredWarnings.map(warning => (
+              <WarningCard key={warning.id} warning={warning} />
+            ))}
+          </div>
+        ) : (
+          <div className="glass-card p-12 text-center">
+            <CheckCircle className="w-16 h-16 text-green-400 mx-auto mb-4" />
+            <div className="text-lg text-white font-medium">暂无符合条件的预警</div>
+            <div className="text-dark-400 text-sm mt-2">所有小区运营状态良好</div>
+          </div>
+        )
       ) : (
-        <div className="glass-card p-12 text-center">
-          <CheckCircle className="w-16 h-16 text-green-400 mx-auto mb-4" />
-          <div className="text-lg text-white font-medium">暂无符合条件的预警</div>
-          <div className="text-dark-400 text-sm mt-2">所有小区运营状态良好</div>
+        <div className="glass-card p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <ClipboardList className="w-5 h-5 text-primary-400" />
+            <h3 className="text-lg font-semibold text-white">处置台账</h3>
+            <span className="text-sm text-dark-400 ml-2">共 {filteredWarnings.length} 条记录</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-dark-700">
+                  <th className="text-left py-3 px-3 text-xs font-medium text-dark-400 uppercase">小区</th>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-dark-400 uppercase">预警级别</th>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-dark-400 uppercase">类型</th>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-dark-400 uppercase">触发日期</th>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-dark-400 uppercase">持续天数</th>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-dark-400 uppercase">审批阶段</th>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-dark-400 uppercase">处理结果</th>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-dark-400 uppercase">最后处理人</th>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-dark-400 uppercase">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredWarnings.map(w => {
+                  const result = getDisposalResult(w);
+                  const ResultIcon = result.icon;
+                  const lastHandler = w.approvalHistory
+                    ?.filter(h => h.status !== 'pending')
+                    .pop();
+                  return (
+                    <tr key={w.id} className="border-b border-dark-800 hover:bg-dark-800/50 transition-colors">
+                      <td className="py-3 px-3 text-sm text-white font-medium">{w.communityName}</td>
+                      <td className="py-3 px-3">
+                        <span className={`tag ${w.level === 'level2' ? 'tag-danger' : 'tag-warning'}`}>
+                          {getWarningLevelName(w.level)}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className="tag tag-primary">{getWarningTypeName(w.type)}</span>
+                      </td>
+                      <td className="py-3 px-3 text-sm text-dark-300">{w.triggerDate}</td>
+                      <td className="py-3 px-3 text-sm text-dark-300">{w.processingDays}天</td>
+                      <td className="py-3 px-3 text-sm text-dark-300">{getCurrentStage(w)}</td>
+                      <td className="py-3 px-3">
+                        <span className={`flex items-center gap-1 text-sm ${result.color}`}>
+                          <ResultIcon className="w-3.5 h-3.5" />
+                          {result.label}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-sm text-dark-300">
+                        {lastHandler ? lastHandler.handler : '-'}
+                      </td>
+                      <td className="py-3 px-3">
+                        <button
+                          className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1"
+                          onClick={() => navigate(`/warnings/${w.id}`)}
+                        >
+                          详情 <ChevronRight className="w-3 h-3" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {filteredWarnings.length === 0 && (
+            <div className="text-center py-8 text-dark-400">暂无符合条件的记录</div>
+          )}
         </div>
       )}
 
