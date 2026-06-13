@@ -3,6 +3,8 @@ import type { RegionContextType } from '../types';
 import { useAuth } from './AuthContext';
 import { getCitiesByProvince, provinces } from '../data/mockData';
 import { roleHierarchy } from './AuthContext';
+import { useAppStore } from '../store';
+import { mockUsers } from './AuthContext';
 
 const RegionContext = createContext<RegionContextType | undefined>(undefined);
 
@@ -10,28 +12,83 @@ interface RegionProviderProps {
   children: ReactNode;
 }
 
+function getInitialRegion() {
+  const storedRole = useAppStore.getState().currentRole;
+  const user = storedRole && mockUsers[storedRole] ? mockUsers[storedRole] : mockUsers.municipal;
+
+  if (user.role === 'national') {
+    return {
+      level: 'national' as const,
+      provinceId: undefined,
+      cityId: undefined,
+      provinceName: undefined,
+      cityName: undefined,
+    };
+  } else if (user.role === 'provincial') {
+    const province = provinces.find(p => p.id === user.regionId);
+    if (province) {
+      return {
+        level: 'province' as const,
+        provinceId: province.id,
+        cityId: undefined,
+        provinceName: province.name,
+        cityName: undefined,
+      };
+    }
+  } else if (user.role === 'municipal') {
+    const cities = getCitiesByProvince('110000');
+    const city = cities.find(c => c.id === user.regionId);
+    if (city) {
+      return {
+        level: 'city' as const,
+        provinceId: '110000',
+        cityId: city.id,
+        provinceName: '北京市',
+        cityName: city.name,
+      };
+    }
+  } else if (user.role === 'district' || user.role === 'property') {
+    return {
+      level: 'city' as const,
+      provinceId: '110000',
+      cityId: '110100',
+      provinceName: '北京市',
+      cityName: '北京市',
+    };
+  }
+
+  return {
+    level: 'national' as const,
+    provinceId: undefined,
+    cityId: undefined,
+    provinceName: undefined,
+    cityName: undefined,
+  };
+}
+
 export function RegionProvider({ children }: RegionProviderProps) {
   const { user } = useAuth();
-  const [level, setLevel] = useState<'national' | 'province' | 'city'>('national');
-  const [provinceId, setProvinceId] = useState<string | undefined>();
-  const [cityId, setCityId] = useState<string | undefined>();
-  const [provinceName, setProvinceName] = useState<string | undefined>();
-  const [cityName, setCityName] = useState<string | undefined>();
+  const initialRegion = getInitialRegion();
+  const [level, setLevel] = useState<'national' | 'province' | 'city'>(initialRegion.level);
+  const [provinceId, setProvinceId] = useState<string | undefined>(initialRegion.provinceId);
+  const [cityId, setCityId] = useState<string | undefined>(initialRegion.cityId);
+  const [provinceName, setProvinceName] = useState<string | undefined>(initialRegion.provinceName);
+  const [cityName, setCityName] = useState<string | undefined>(initialRegion.cityName);
 
   useEffect(() => {
     if (!user) return;
 
-    const roleLevel = roleHierarchy[user.role];
-
     if (user.role === 'national') {
-      setLevel('national');
-      setProvinceId(undefined);
-      setCityId(undefined);
-      setProvinceName(undefined);
-      setCityName(undefined);
+      if (level !== 'national') {
+        setLevel('national');
+        setProvinceId(undefined);
+        setCityId(undefined);
+        setProvinceName(undefined);
+        setCityName(undefined);
+      }
     } else if (user.role === 'provincial') {
       const province = provinces.find(p => p.id === user.regionId);
-      if (province) {
+      if (province && provinceId !== province.id) {
         setLevel('province');
         setProvinceId(province.id);
         setProvinceName(province.name);
@@ -41,7 +98,7 @@ export function RegionProvider({ children }: RegionProviderProps) {
     } else if (user.role === 'municipal') {
       const cities = getCitiesByProvince('110000');
       const city = cities.find(c => c.id === user.regionId);
-      if (city) {
+      if (city && cityId !== city.id) {
         setLevel('city');
         setProvinceId('110000');
         setProvinceName('北京市');
@@ -49,13 +106,15 @@ export function RegionProvider({ children }: RegionProviderProps) {
         setCityName(city.name);
       }
     } else if (user.role === 'district' || user.role === 'property') {
-      setLevel('city');
-      setProvinceId('110000');
-      setProvinceName('北京市');
-      setCityId('110100');
-      setCityName('北京市');
+      if (cityId !== '110100') {
+        setLevel('city');
+        setProvinceId('110000');
+        setProvinceName('北京市');
+        setCityId('110100');
+        setCityName('北京市');
+      }
     }
-  }, [user]);
+  }, [user, level, provinceId, cityId]);
 
   const setProvince = (id: string, name: string) => {
     if (user && roleHierarchy[user.role] < roleHierarchy['provincial']) return;

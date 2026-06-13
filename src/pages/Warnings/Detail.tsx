@@ -38,6 +38,29 @@ export default function WarningDetail() {
   const [approvalOpinion, setApprovalOpinion] = useState('');
   const [processingReport, setProcessingReport] = useState('');
 
+  const hasWarningPermission = (warningId: string): boolean => {
+    if (!user) return false;
+    const w = warnings.find(item => item.id === warningId);
+    if (!w) return false;
+    
+    if (user.role === 'national' || user.role === 'provincial' || user.role === 'municipal') {
+      return true;
+    }
+    
+    if (user.role === 'district') {
+      const comm = getCommunityById(w.communityId);
+      return comm?.district === '朝阳区' || comm?.district?.includes('朝阳');
+    }
+    
+    if (user.role === 'property') {
+      return w.communityId === user.regionId;
+    }
+    
+    return false;
+  };
+
+  const showNoPermission = warning && !hasWarningPermission(id || '');
+
   const trendData = useMemo(() => {
     if (!warning) return [];
     return Array.from({ length: 30 }, (_, i) => {
@@ -55,6 +78,24 @@ export default function WarningDetail() {
       };
     });
   }, [warning]);
+
+  if (showNoPermission) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 space-y-4">
+        <div className="w-16 h-16 rounded-full bg-danger/20 flex items-center justify-center">
+          <XCircle className="w-8 h-8 text-red-400" />
+        </div>
+        <div className="text-lg font-medium text-white">无权限访问该预警</div>
+        <div className="text-sm text-dark-400">您当前的账号权限不足以查看此预警的详细信息</div>
+        <button
+          className="btn btn-primary mt-2"
+          onClick={() => navigate('/warnings')}
+        >
+          返回预警列表
+        </button>
+      </div>
+    );
+  }
 
   if (!warning) {
     return (

@@ -5,10 +5,10 @@ export interface ExcelRow {
   批次?: number | string;
   批次号?: number | string;
   batch?: number | string;
-  投放时间?: string;
-  投放日期?: string;
-  日期?: string;
-  date?: string;
+  投放时间?: string | number;
+  投放日期?: string | number;
+  日期?: string | number;
+  date?: string | number;
   房源数量?: number | string;
   总套数?: number | string;
   套数?: number | string;
@@ -23,6 +23,87 @@ export interface ExcelRow {
   去化率?: number | string;
 }
 
+function seededRandom(seed: string): () => number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    const char = seed.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return function() {
+    hash = Math.sin(hash) * 10000;
+    return hash - Math.floor(hash);
+  };
+}
+
+function isExcelSerialDate(value: number): boolean {
+  return value > 20000 && value < 80000;
+}
+
+function excelSerialToDate(serial: number): Date {
+  const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+  const result = new Date(excelEpoch.getTime() + serial * 24 * 60 * 60 * 1000);
+  return result;
+}
+
+function parseDateValue(value: string | number | undefined): string {
+  if (value === undefined || value === null || value === '') {
+    return '';
+  }
+
+  if (typeof value === 'number') {
+    if (isExcelSerialDate(value)) {
+      const date = excelSerialToDate(value);
+      return date.toISOString().split('T')[0];
+    }
+    return '';
+  }
+
+  const dateStr = String(value).trim();
+  
+  if (!dateStr) return '';
+
+  const isoMatch = dateStr.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1]);
+    const month = parseInt(isoMatch[2]) - 1;
+    const day = parseInt(isoMatch[3]);
+    const date = new Date(year, month, day);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString().split('T')[0];
+    }
+  }
+
+  const cnMatch = dateStr.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日/);
+  if (cnMatch) {
+    const year = parseInt(cnMatch[1]);
+    const month = parseInt(cnMatch[2]) - 1;
+    const day = parseInt(cnMatch[3]);
+    const date = new Date(year, month, day);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString().split('T')[0];
+    }
+  }
+
+  const shortDateMatch = dateStr.match(/^(\d{1,2})[-/.月](\d{1,2})[日]?$/);
+  if (shortDateMatch) {
+    const now = new Date();
+    const month = parseInt(shortDateMatch[1]) - 1;
+    const day = parseInt(shortDateMatch[2]);
+    const date = new Date(now.getFullYear(), month, day);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString().split('T')[0];
+    }
+  }
+
+  const date = new Date(dateStr);
+  if (!isNaN(date.getTime())) {
+    return date.toISOString().split('T')[0];
+  }
+
+  return '';
+}
+
 export async function parseExcelFile(file: File): Promise<AllocationPlan> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -30,7 +111,7 @@ export async function parseExcelFile(file: File): Promise<AllocationPlan> {
     reader.onload = (e) => {
       try {
         const data = e.target?.result;
-        const workbook = XLSX.read(data, { type: 'binary' });
+        const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet) as ExcelRow[];
@@ -43,15 +124,9 @@ export async function parseExcelFile(file: File): Promise<AllocationPlan> {
             String(row.批次 || row.批次号 || row.batch || index + 1)
           );
           
-          let releaseDate = String(
-            row.投放时间 || row.投放日期 || row.日期 || row.date || ''
-          );
-          
-          if (!releaseDate) {
-            const date = new Date();
-            date.setMonth(date.getMonth() + index * 2);
-            releaseDate = date.toISOString().split('T')[0];
-          }
+          const releaseDate = parseDateValue(
+            row.投放时间 || row.投放日期 || row.日期 || row.date
+          ) || '';
 
           const units = parseInt(
             String(row.房源数量 || row.总套数 || row.套数 || row.units || 500)
@@ -124,9 +199,10 @@ export async function parseExcelFile(file: File): Promise<AllocationPlan> {
         const predictedGap = Math.floor(totalUnits * 0.55 + batches.length * 300);
 
         const recommendations = generateRecommendations(batches, totalUnits, predictedGap);
+        const planId = batches.map(b => `${b.batchNumber}-${b.releaseDate}-${b.units}`).join('|');
 
         resolve({
-          id: `plan-${Date.now()}`,
+          id: `plan-${planId}`,
           year: new Date().getFullYear(),
           batches,
           totalUnits,
@@ -208,6 +284,9 @@ export function generateGapPrediction(batches: AllocationBatch[]): { date: strin
     new Date(a.releaseDate).getTime() - new Date(b.releaseDate).getTime()
   );
 
+  const seed = sortedBatches.map(b => `${b.batchNumber}-${b.releaseDate}-${b.units}`).join('|');
+  const random = seededRandom(seed + '-gap-prediction');
+
   let currentGap = 3000;
   
   for (let i = 0; i < 90; i++) {
@@ -216,6 +295,7 @@ export function generateGapPrediction(batches: AllocationBatch[]): { date: strin
     const dateStr = `${date.getMonth() + 1}/${date.getDate()}`;
     
     const batchOnDate = sortedBatches.find(b => {
+      if (!b.releaseDate) return false;
       const batchDate = new Date(b.releaseDate);
       return batchDate.toDateString() === date.toDateString();
     });
@@ -226,7 +306,7 @@ export function generateGapPrediction(batches: AllocationBatch[]): { date: strin
       currentGap += 40 + Math.sin(i * 0.1) * 20;
     }
 
-    currentGap += Math.random() * 30 - 10;
+    currentGap += random() * 30 - 10;
     currentGap = Math.max(0, currentGap);
 
     data.push({

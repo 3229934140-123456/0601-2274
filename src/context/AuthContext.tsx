@@ -19,7 +19,7 @@ export const roleHierarchy: Record<UserRole, number> = {
   property: 1,
 };
 
-const mockUsers: Record<UserRole, User> = {
+export const mockUsers: Record<UserRole, User> = {
   national: {
     id: 'user-national',
     name: '国家住建部管理员',
@@ -61,16 +61,24 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+function getInitialUser(): User {
+  const storedRole = useAppStore.getState().currentRole;
+  if (storedRole && mockUsers[storedRole]) {
+    return mockUsers[storedRole];
+  }
+  return mockUsers.municipal;
+}
+
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [user, setUser] = useState<User | null>(mockUsers.municipal);
+  const [user, setUser] = useState<User | null>(getInitialUser);
   const setCurrentRole = useAppStore((state) => state.setCurrentRole);
   const storedRole = useAppStore((state) => state.currentRole);
 
   useEffect(() => {
-    if (storedRole && mockUsers[storedRole]) {
+    if (storedRole && mockUsers[storedRole] && user?.role !== storedRole) {
       setUser(mockUsers[storedRole]);
     }
-  }, [storedRole]);
+  }, [storedRole, user?.role]);
 
   const login = (role: UserRole) => {
     setUser(mockUsers[role]);
