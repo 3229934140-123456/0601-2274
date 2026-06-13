@@ -15,13 +15,18 @@ import {
   Home,
   DollarSign,
   Send,
+  ArrowUpCircle,
+  Download,
+  Printer,
+  ClipboardList,
 } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import { getCommunityById } from '../../data/mockData';
-import { getWarningLevelName, getWarningTypeName, getWarningStatusName, formatPercent, formatDate, cn } from '../../utils/format';
+import { getWarningLevelName, getWarningTypeName, getWarningStatusName, formatPercent, formatDate, cn, formatNumber } from '../../utils/format';
 import LineChart from '../../components/charts/LineChart';
 import { useAppStore } from '../../store';
 import { useAuth } from '../../context/AuthContext';
+import type { DisposalLogEntry } from '../../types';
 
 export default function WarningDetail() {
   const { id } = useParams<{ id: string }>();
@@ -131,7 +136,8 @@ export default function WarningDetail() {
       warning.id,
       warning.approvalStage,
       approvalOpinion,
-      user?.name || handlerNames[user?.role || ''] || '审批人'
+      user?.name || handlerNames[user?.role || ''] || '审批人',
+      user?.role
     );
     setApprovalOpinion('');
   };
@@ -147,19 +153,30 @@ export default function WarningDetail() {
       warning.id,
       warning.approvalStage,
       approvalOpinion,
-      user?.name || handlerNames[user?.role || ''] || '审批人'
+      user?.name || handlerNames[user?.role || ''] || '审批人',
+      user?.role
     );
     setApprovalOpinion('');
   };
 
   const handleMarkResolved = () => {
     if (!processingReport.trim()) return;
-    resolveWarning(warning.id, processingReport);
+    resolveWarning(
+      warning.id,
+      processingReport,
+      user?.name || '物业管理员',
+      user?.role
+    );
     setProcessingReport('');
   };
 
   const handleMarkProcessing = () => {
-    markWarningProcessing(warning.id);
+    markWarningProcessing(
+      warning.id,
+      user?.name || '物业管理员',
+      user?.role,
+      '通过系统标记为处理中'
+    );
   };
 
   const canHandleApproval = (stage: number) => {
@@ -491,71 +508,146 @@ export default function WarningDetail() {
       )}
 
       <div className="glass-card p-5">
-        <h3 className="section-title">处置记录</h3>
-        <div className="space-y-0">
-          <TimelineItem
-            icon={<AlertTriangle className="w-4 h-4" />}
-            color="warning"
-            title="预警触发"
-            date={warning.triggerDate}
-            description={`${warning.communityName} ${getWarningTypeName(warning.type)}指标触发${getWarningLevelName(warning.level)}`}
-          />
-          
-          {warning.status === 'processing' && (
-            <TimelineItem
-              icon={<Clock className="w-4 h-4" />}
-              color="primary"
-              title="开始处理"
-              date=""
-              description="已标记为处理中状态"
-            />
-          )}
-          
-          {warning.approvalHistory?.filter(h => h.status !== 'pending').map((h, idx) => (
-            <TimelineItem
-              key={idx}
-              icon={h.status === 'approved' ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-              color={h.status === 'approved' ? 'success' : 'danger'}
-              title={`${h.stageName} - ${h.status === 'approved' ? '通过' : '驳回'}`}
-              date={h.date}
-              handler={h.handler}
-              handlerRole={h.handlerRole}
-              description={h.opinion}
-            />
-          ))}
-          
-          {warning.status === 'resolved' && (
-            <TimelineItem
-              icon={<CheckCircle className="w-4 h-4" />}
-              color="success"
-              title="预警解除"
-              date=""
-              description="该预警已处理完成并解除"
-              isLast
-            />
-          )}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <ClipboardList className="w-5 h-5 text-primary-400" />
+            <h3 className="text-lg font-semibold text-white">处置审计台账</h3>
+            <span className="text-xs text-dark-400">
+              共 {(warning.disposalLog || []).length} 条处置记录
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="btn btn-secondary text-xs px-3 py-1.5"
+              onClick={() => {
+                if (!warning.disposalLog) return;
+                const lines: string[] = [];
+                lines.push(`# ${warning.communityName} 预警处置审计台账`);
+                lines.push(`预警编号：${warning.id}`);
+                lines.push(`预警级别：${getWarningLevelName(warning.level)}`);
+                lines.push(`预警类型：${getWarningTypeName(warning.type)}`);
+                lines.push(`触发日期：${warning.triggerDate}`);
+                lines.push(`当前状态：${getWarningStatusName(warning.status)}`);
+                lines.push(``);
+                warning.disposalLog.forEach((log, i) => {
+                  const t = log.timestamp ? new Date(log.timestamp) : null;
+                  lines.push(`--- ${i + 1}. ${log.actionLabel} ---`);
+                  lines.push(`时间：${t ? formatDate(t.toISOString().split('T')[0]) + ' ' + t.toTimeString().slice(0, 5) : '-'}`);
+                  lines.push(`处理人：${log.handler || '-'}${log.handlerRoleName ? `（${log.handlerRoleName}）` : ''}`);
+                  if (log.stageName) lines.push(`阶段：${log.stageName}`);
+                  if (log.result) lines.push(`结果：${log.result === 'approved' ? '通过' : log.result === 'rejected' ? '驳回' : '成功'}`);
+                  if (log.description) lines.push(`说明：${log.description}`);
+                  if (log.remark) lines.push(`备注：${log.remark}`);
+                  lines.push(``);
+                });
+                const text = lines.join('\n');
+                const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${warning.communityName}_${warning.id}_处置台账.txt`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              <Download className="w-3.5 h-3.5" />
+              导出台账
+            </button>
+            <button
+              className="btn btn-secondary text-xs px-3 py-1.5"
+              onClick={() => window.print()}
+            >
+              <Printer className="w-3.5 h-3.5" />
+              打印
+            </button>
+          </div>
+        </div>
+
+        {warning.disposalLog && warning.disposalLog.length > 0 ? (
+          <div className="space-y-0">
+            {warning.disposalLog.map((log, idx, list) => {
+              const t = log.timestamp ? new Date(log.timestamp) : null;
+              const dateStr = t ? formatDate(t.toISOString().split('T')[0]) : '';
+              const timeStr = t ? t.toTimeString().slice(0, 5) : '';
+              let color: 'primary' | 'success' | 'warning' | 'danger' = 'primary';
+              let icon: React.ReactNode = <Clock className="w-4 h-4" />;
+              switch (log.action) {
+                case 'trigger': color = 'warning'; icon = <AlertTriangle className="w-4 h-4" />; break;
+                case 'start_processing': color = 'primary'; icon = <Clock className="w-4 h-4" />; break;
+                case 'escalate': color = 'danger'; icon = <ArrowUpCircle className="w-4 h-4" />; break;
+                case 'submit_report': color = 'primary'; icon = <FileText className="w-4 h-4" />; break;
+                case 'resolve': color = 'success'; icon = <CheckCircle className="w-4 h-4" />; break;
+                case 'approval': color = 'success'; icon = <CheckCircle className="w-4 h-4" />; break;
+                case 'reject': color = 'danger'; icon = <XCircle className="w-4 h-4" />; break;
+              }
+              return (
+                <TimelineItem
+                  key={log.id || idx}
+                  icon={icon}
+                  color={color}
+                  title={log.actionLabel}
+                  date={dateStr}
+                  time={timeStr}
+                  handler={log.handler}
+                  handlerRole={log.handlerRoleName}
+                  description={log.description}
+                  remark={log.remark}
+                  result={log.result}
+                  isLast={idx === list.length - 1}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-sm text-dark-400 text-center py-8">暂无处置记录</div>
+        )}
+      </div>
+
+      <div className="glass-card p-5">
+        <h3 className="section-title">关键节点汇总</h3>
+        <div className="grid grid-cols-5 gap-3 text-sm">
+          <div className="p-3 bg-dark-800/50 rounded-lg border border-dark-700">
+            <div className="text-xs text-dark-400 mb-1">预警触发</div>
+            <div className="text-white font-medium">{warning.triggerDate || '-'}</div>
+          </div>
+          <div className="p-3 bg-dark-800/50 rounded-lg border border-dark-700">
+            <div className="text-xs text-dark-400 mb-1">开始处理</div>
+            <div className="text-white font-medium">{warning.processingStartDate || '-'}</div>
+          </div>
+          <div className="p-3 bg-dark-800/50 rounded-lg border border-dark-700">
+            <div className="text-xs text-dark-400 mb-1">提交报告</div>
+            <div className="text-white font-medium">{warning.reportDate || '-'}</div>
+          </div>
+          <div className="p-3 bg-dark-800/50 rounded-lg border border-dark-700">
+            <div className="text-xs text-dark-400 mb-1">最后动作</div>
+            <div className="text-white font-medium">
+              {warning.lastActionDate || '-'}
+              {warning.lastHandler && <span className="text-dark-400 text-xs ml-1">by {warning.lastHandler}</span>}
+            </div>
+          </div>
+          <div className="p-3 bg-dark-800/50 rounded-lg border border-dark-700">
+            <div className="text-xs text-dark-400 mb-1">解除时间</div>
+            <div className="text-white font-medium">{warning.resolveDate || '-'}</div>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function TimelineItem({ icon, color, title, date, handler, handlerRole, description, isLast }: {
+function TimelineItem({ icon, color, title, date, time, handler, handlerRole, description, remark, result, isLast }: {
   icon: React.ReactNode;
   color: 'primary' | 'success' | 'warning' | 'danger';
   title: string;
   date: string;
+  time?: string;
   handler?: string;
   handlerRole?: string;
   description?: string;
+  remark?: string;
+  result?: 'approved' | 'rejected' | 'success';
   isLast?: boolean;
 }) {
-  const dotColors = {
-    primary: 'bg-primary-500',
-    success: 'bg-green-500',
-    warning: 'bg-orange-500',
-    danger: 'bg-red-500',
-  };
   const iconBgColors = {
     primary: 'bg-primary-500/20 text-primary-400',
     success: 'bg-green-500/20 text-green-400',
@@ -566,25 +658,40 @@ function TimelineItem({ icon, color, title, date, handler, handlerRole, descript
   return (
     <div className="flex gap-4">
       <div className="flex flex-col items-center">
-        <div className={cn('w-8 h-8 rounded-full flex items-center justify-center', iconBgColors[color])}>
+        <div className={cn('w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0', iconBgColors[color])}>
           {icon}
         </div>
         {!isLast && <div className="w-0.5 flex-1 bg-dark-700 my-1" />}
       </div>
       <div className={cn('flex-1 pb-6', isLast && 'pb-0')}>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <span className="text-sm font-medium text-white">{title}</span>
-          {date && <span className="text-xs text-dark-400">{date}</span>}
+          {date && <span className="text-xs text-dark-400">{date}{time && ` ${time}`}</span>}
+          {result && (
+            <span className={cn('text-xs tag',
+              result === 'approved' && 'tag-success',
+              result === 'rejected' && 'tag-danger',
+              result === 'success' && 'tag-primary'
+            )}>
+              {result === 'approved' ? '通过' : result === 'rejected' ? '驳回' : '完成'}
+            </span>
+          )}
         </div>
         {(handler || handlerRole) && (
           <div className="flex items-center gap-3 mt-1">
-            {handler && <span className="text-xs text-dark-300">处理人：{handler}</span>}
+            {handler && <span className="text-xs text-dark-300 flex items-center gap-1"><User className="w-3 h-3" />{handler}</span>}
             {handlerRole && <span className="text-xs text-dark-500">({handlerRole})</span>}
           </div>
         )}
         {description && (
           <div className="mt-2 p-2 bg-dark-800/50 rounded text-sm text-dark-300">
             {description}
+          </div>
+        )}
+        {remark && (
+          <div className="mt-1 text-xs text-dark-500 flex items-start gap-1">
+            <span className="text-dark-600">※</span>
+            <span>备注：{remark}</span>
           </div>
         )}
       </div>

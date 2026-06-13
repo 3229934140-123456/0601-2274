@@ -63,6 +63,30 @@ export type WarningLevel = 'level1' | 'level2';
 export type WarningType = 'vacancy' | 'rent';
 export type WarningStatus = 'active' | 'processing' | 'resolved' | 'escalated';
 
+export type DisposalActionType =
+  | 'trigger'
+  | 'start_processing'
+  | 'submit_report'
+  | 'resolve'
+  | 'escalate'
+  | 'approval'
+  | 'reject';
+
+export interface DisposalLogEntry {
+  id: string;
+  timestamp: string;
+  action: DisposalActionType;
+  actionLabel: string;
+  handler?: string;
+  handlerRole?: string;
+  handlerRoleName?: string;
+  description?: string;
+  remark?: string;
+  stage?: number;
+  stageName?: string;
+  result?: 'approved' | 'rejected' | 'success';
+}
+
 export interface Warning {
   id: string;
   communityId: string;
@@ -77,6 +101,13 @@ export interface Warning {
   processingDays: number;
   approvalStage?: number;
   approvalHistory?: ApprovalRecord[];
+  disposalLog?: DisposalLogEntry[];
+  processingStartDate?: string;
+  reportDate?: string;
+  resolveDate?: string;
+  escalateDate?: string;
+  lastHandler?: string;
+  lastActionDate?: string;
 }
 
 export interface ApprovalRecord {
@@ -193,6 +224,13 @@ export interface AllocationBatch {
   unitTypes: { type: string; count: number }[];
   estimatedWaiters: number;
   expectedFillRate: number;
+  actualReleaseDate?: string;
+  actualUnits?: number;
+  actualFillRate?: number;
+  actualWaiters?: number;
+  deviationReason?: string;
+  status?: 'planned' | 'in_progress' | 'completed' | 'cancelled';
+  actualRemark?: string;
 }
 
 export interface DataSourceStatus {
