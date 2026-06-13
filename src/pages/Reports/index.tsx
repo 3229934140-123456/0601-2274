@@ -18,12 +18,20 @@ import {
   CheckCircle,
   Users,
 } from 'lucide-react';
-import { weeklyReports } from '../../data/mockData';
+import { getReportsByRole } from '../../data/mockData';
 import LineChart from '../../components/charts/LineChart';
 import { cn, formatPercent, formatNumber, formatDate } from '../../utils/format';
+import { useAuth } from '../../context/AuthContext';
 
 export default function Reports() {
+  const { user } = useAuth();
   const [selectedReportIndex, setSelectedReportIndex] = useState(0);
+
+  const weeklyReports = useMemo(() => {
+    if (!user) return [];
+    return getReportsByRole(user.role, user.regionId);
+  }, [user]);
+
   const currentReport = weeklyReports[selectedReportIndex];
 
   const trendData = useMemo(() => {
@@ -107,13 +115,33 @@ export default function Reports() {
     low: 'bg-info/20 text-cyan-400 border-info/30',
   };
 
+  const getReportScopeName = () => {
+    if (!user) return '全国';
+    switch (user.role) {
+      case 'national': return '全国';
+      case 'provincial': return user.regionName;
+      case 'municipal': return user.regionName;
+      case 'district': return user.regionName;
+      case 'property': return user.regionName;
+      default: return '全国';
+    }
+  };
+
+  if (weeklyReports.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-dark-400">暂无报告数据</div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 fade-in-up">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-white">运营健康报告</h2>
+          <h2 className="text-2xl font-bold text-white">{getReportScopeName()}运营健康报告</h2>
           <p className="text-dark-400 text-sm mt-1">
-            每周自动生成运营健康报告，提供数据分析与优化建议
+            每周自动生成{getReportScopeName()}运营健康报告，提供数据分析与优化建议
           </p>
         </div>
         <div className="flex items-center gap-3">

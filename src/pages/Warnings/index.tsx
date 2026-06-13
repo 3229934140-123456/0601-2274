@@ -10,9 +10,11 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import WarningCard from '../../components/WarningCard';
-import { warnings } from '../../data/mockData';
 import { cn, getWarningLevelName, getWarningStatusName, getWarningTypeName } from '../../utils/format';
 import type { WarningLevel, WarningStatus, WarningType } from '../../types';
+import { useAppStore } from '../../store';
+import { useAuth } from '../../context/AuthContext';
+import { getCommunityById } from '../../data/mockData';
 
 const levelFilters: { value: WarningLevel | 'all'; label: string; count?: number }[] = [
   { value: 'all', label: '全部' },
@@ -36,29 +38,59 @@ const typeFilters: { value: WarningType | 'all'; label: string }[] = [
 
 export default function Warnings() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const storeWarnings = useAppStore((state) => state.warnings);
   const [levelFilter, setLevelFilter] = useState<WarningLevel | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<WarningStatus | 'all'>('all');
   const [typeFilter, setTypeFilter] = useState<WarningType | 'all'>('all');
   const [searchText, setSearchText] = useState('');
 
   const filteredWarnings = useMemo(() => {
-    return warnings.filter(w => {
+    let result = storeWarnings;
+
+    if (user?.role === 'district') {
+      result = result.filter(w => {
+        const community = getCommunityById(w.communityId);
+        return community?.district === '朝阳区' || community?.district?.includes('朝阳');
+      });
+    }
+
+    if (user?.role === 'property') {
+      result = result.filter(w => w.communityId === user.regionId);
+    }
+
+    return result.filter(w => {
       if (levelFilter !== 'all' && w.level !== levelFilter) return false;
       if (statusFilter !== 'all' && w.status !== statusFilter) return false;
       if (typeFilter !== 'all' && w.type !== typeFilter) return false;
       if (searchText && !w.communityName.includes(searchText)) return false;
       return true;
     });
-  }, [levelFilter, statusFilter, typeFilter, searchText]);
+  }, [storeWarnings, levelFilter, statusFilter, typeFilter, searchText, user]);
 
-  const stats = useMemo(() => ({
-    total: warnings.length,
-    active: warnings.filter(w => w.status === 'active').length,
-    processing: warnings.filter(w => w.status === 'processing' || w.status === 'escalated').length,
-    resolved: warnings.filter(w => w.status === 'resolved').length,
-    level1: warnings.filter(w => w.level === 'level1' && w.status !== 'resolved').length,
-    level2: warnings.filter(w => w.level === 'level2' && w.status !== 'resolved').length,
-  }), []);
+  const stats = useMemo(() => {
+    let warnings = storeWarnings;
+    
+    if (user?.role === 'district') {
+      warnings = warnings.filter(w => {
+        const community = getCommunityById(w.communityId);
+        return community?.district === '朝阳区' || community?.district?.includes('朝阳');
+      });
+    }
+
+    if (user?.role === 'property') {
+      warnings = warnings.filter(w => w.communityId === user.regionId);
+    }
+
+    return {
+      total: warnings.length,
+      active: warnings.filter(w => w.status === 'active').length,
+      processing: warnings.filter(w => w.status === 'processing' || w.status === 'escalated').length,
+      resolved: warnings.filter(w => w.status === 'resolved').length,
+      level1: warnings.filter(w => w.level === 'level1' && w.status !== 'resolved').length,
+      level2: warnings.filter(w => w.level === 'level2' && w.status !== 'resolved').length,
+    };
+  }, [storeWarnings, user]);
 
   return (
     <div className="space-y-6 fade-in-up">

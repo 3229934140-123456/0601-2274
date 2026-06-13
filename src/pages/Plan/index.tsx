@@ -13,18 +13,28 @@ import {
   Info,
   Lightbulb,
   ChevronRight,
+  RefreshCw,
 } from 'lucide-react';
-import { allocationPlan } from '../../data/mockData';
 import LineChart from '../../components/charts/LineChart';
 import BarChart from '../../components/charts/BarChart';
 import { cn, formatNumber, formatDate } from '../../utils/format';
+import { useAppStore } from '../../store';
+import { parseExcelFile, generateGapPrediction } from '../../utils/excelParser';
+import type { AllocationPlan } from '../../types';
+import { allocationPlan as defaultPlan } from '../../data/mockData';
 
 export default function Plan() {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isParsing, setIsParsing] = useState(false);
   const [parseProgress, setParseProgress] = useState(0);
+  const [parseError, setParseError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const storePlan = useAppStore((state) => state.allocationPlan);
+  const setAllocationPlan = useAppStore((state) => state.setAllocationPlan);
+  const resetAllocationPlan = useAppStore((state) => state.resetAllocationPlan);
+
+  const currentPlan: AllocationPlan = storePlan || defaultPlan;
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -44,22 +54,40 @@ export default function Plan() {
     }
   };
 
-  const handleFileSelect = (file: File) => {
+  const handleFileSelect = async (file: File) => {
     if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
       setUploadedFile(file);
       setIsParsing(true);
       setParseProgress(0);
+      setParseError(null);
 
-      const interval = setInterval(() => {
+      const progressInterval = setInterval(() => {
         setParseProgress(prev => {
-          if (prev >= 100) {
-            clearInterval(interval);
-            setIsParsing(false);
-            return 100;
+          if (prev >= 70) {
+            clearInterval(progressInterval);
+            return 70;
           }
-          return prev + Math.random() * 15;
+          return prev + Math.random() * 10;
         });
-      }, 200);
+      }, 150);
+
+      try {
+        const plan = await parseExcelFile(file);
+        clearInterval(progressInterval);
+        setParseProgress(100);
+        setAllocationPlan(plan);
+        
+        setTimeout(() => {
+          setIsParsing(false);
+        }, 500);
+      } catch (error) {
+        clearInterval(progressInterval);
+        setParseError('文件解析失败，请检查文件格式');
+        setIsParsing(false);
+        setUploadedFile(null);
+      }
+    } else {
+      setParseError('请上传 .xlsx 或 .xls 格式的文件');
     }
   };
 
@@ -70,24 +98,21 @@ export default function Plan() {
     }
   };
 
-  const gapPredictionData = useMemo(() => {
-    const data = [];
-    const today = new Date();
-    for (let i = 0; i < 90; i++) {
-      const date = new Date(today);
-      date.setDate(date.getDate() + i);
-      const baseGap = 5000 + Math.sin(i * 0.1) * 2000;
-      const trend = i * 50;
-      data.push({
-        date: `${date.getMonth() + 1}/${date.getDate()}`,
-        value: Math.round(baseGap + trend),
-      });
+  const handleReset = () => {
+    setUploadedFile(null);
+    setParseError(null);
+    resetAllocationPlan();
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
-    return data;
-  }, []);
+  };
+
+  const gapPredictionData = useMemo(() => {
+    return generateGapPrediction(currentPlan.batches);
+  }, [currentPlan.batches]);
 
   const releasePoints = useMemo(() => {
-    return allocationPlan.batches.map(batch => {
+    return currentPlan.batches.map(batch => {
       const batchDate = new Date(batch.releaseDate);
       const daysDiff = Math.floor((batchDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
       return {
@@ -96,7 +121,11 @@ export default function Plan() {
         daysDiff,
       };
     }).filter(b => b.daysDiff > 0 && b.daysDiff < 90);
-  }, []);
+  }, [currentPlan.batches]);
+
+  const totalWaiters = useMemo(() => {
+    return currentPlan.batches.reduce((sum, b) => sum + b.estimatedWaiters, 0);
+  }, [currentPlan.batches]);
 
   return (
     <div className="space-y-6 fade-in-up">
@@ -107,37 +136,51 @@ export default function Plan() {
             上传年度分配计划，智能预测分配缺口，推荐最优分房批次
           </p>
         </div>
-        <button className="btn btn-secondary">
-          <Download className="w-4 h-4" />
-          下载模板
-        </button>
+        <div className="flex items-center gap-3">
+          {uploadedFile && (
+            <button className="btn btn-secondary" onClick={handleReset}>
+              <RefreshCw className="w-4 h-4" />
+              重置
+            </button>
+          )}
+          <button className="btn btn-secondary">
+            <Download className="w-4 h-4" />
+            下载模板
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-4 gap-5">
         <div className="glass-card p-5">
           <div className="text-dark-400 text-sm mb-1">年度总房源</div>
-          <div className="text-2xl font-bold text-white">{formatNumber(allocationPlan.totalUnits)}</div>
+          <div className="text-2xl font-bold text-white">{formatNumber(currentPlan.totalUnits)}</div>
           <div className="text-xs text-dark-500 mt-1">套</div>
         </div>
         <div className="glass-card p-5">
           <div className="text-dark-400 text-sm mb-1">分配批次</div>
-          <div className="text-2xl font-bold text-primary-400">{allocationPlan.batches.length}</div>
+          <div className="text-2xl font-bold text-primary-400">{currentPlan.batches.length}</div>
           <div className="text-xs text-dark-500 mt-1">个批次</div>
         </div>
         <div className="glass-card p-5">
           <div className="text-dark-400 text-sm mb-1">预测缺口</div>
-          <div className="text-2xl font-bold text-orange-400">{formatNumber(allocationPlan.predictedGap)}</div>
+          <div className="text-2xl font-bold text-orange-400">{formatNumber(currentPlan.predictedGap)}</div>
           <div className="text-xs text-dark-500 mt-1">套</div>
         </div>
         <div className="glass-card p-5">
           <div className="text-dark-400 text-sm mb-1">预计轮候家庭</div>
-          <div className="text-2xl font-bold text-cyan-400">4.5万</div>
-          <div className="text-xs text-dark-500 mt-1">户</div>
+          <div className="text-2xl font-bold text-cyan-400">{formatNumber(Math.floor(totalWaiters / currentPlan.batches.length))}</div>
+          <div className="text-xs text-dark-500 mt-1">户/平均批次</div>
         </div>
       </div>
 
       <div className="glass-card p-5">
         <h3 className="section-title">上传年度计划</h3>
+
+        {parseError && (
+          <div className="mb-4 p-3 bg-danger/10 border border-danger/30 rounded-lg text-red-400 text-sm">
+            {parseError}
+          </div>
+        )}
 
         {!uploadedFile ? (
           <div
@@ -168,7 +211,7 @@ export default function Plan() {
             </div>
             <div className="mt-4 flex items-center justify-center gap-2 text-xs text-dark-500">
               <Info className="w-4 h-4" />
-              请使用标准模板格式上传
+              请使用标准模板格式上传，包含批次、投放时间、房源数量等列
             </div>
           </div>
         ) : (
@@ -206,21 +249,21 @@ export default function Plan() {
                 )}
                 <button
                   className="p-1.5 rounded hover:bg-dark-700 text-dark-400 hover:text-white transition-colors"
-                  onClick={() => setUploadedFile(null)}
+                  onClick={handleReset}
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            {!isParsing && (
+            {!isParsing && !parseError && (
               <div className="p-4 bg-primary-500/10 rounded-lg border border-primary-500/30">
                 <div className="flex items-start gap-3">
                   <CheckCircle className="w-5 h-5 text-primary-400 flex-shrink-0 mt-0.5" />
                   <div>
                     <div className="text-sm font-medium text-white">数据校验通过</div>
                     <div className="text-xs text-dark-400 mt-1">
-                      共解析 {allocationPlan.batches.length} 个批次，{allocationPlan.totalUnits} 套房源
+                      共解析 {currentPlan.batches.length} 个批次，{currentPlan.totalUnits} 套房源
                     </div>
                   </div>
                 </div>
@@ -252,12 +295,23 @@ export default function Plan() {
             showArea
             yAxisName="缺口(套)"
           />
+          
+          {releasePoints.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <span className="text-xs text-dark-400">投放节点：</span>
+              {releasePoints.map((point, idx) => (
+                <span key={idx} className="text-xs tag tag-success">
+                  {point.date} · {formatNumber(point.units)}套
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="col-span-4 glass-card p-5">
           <h3 className="section-title">批次房源分布</h3>
           <BarChart
-            data={allocationPlan.batches.map(b => ({
+            data={currentPlan.batches.map(b => ({
               name: `第${b.batchNumber}批`,
               value: b.units,
             }))}
@@ -272,7 +326,7 @@ export default function Plan() {
       <div className="glass-card p-5">
         <h3 className="section-title">分房批次详情</h3>
         <div className="grid grid-cols-4 gap-4">
-          {allocationPlan.batches.map(batch => (
+          {currentPlan.batches.map(batch => (
             <div key={batch.batchNumber} className="p-4 bg-dark-800/50 rounded-xl border border-dark-700 hover:border-primary-500/50 transition-colors">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm font-medium text-white">第 {batch.batchNumber} 批次</span>
@@ -316,7 +370,7 @@ export default function Plan() {
           <h3 className="text-lg font-semibold text-white">优化建议</h3>
         </div>
         <div className="grid grid-cols-2 gap-4">
-          {allocationPlan.recommendations.map((rec, index) => (
+          {currentPlan.recommendations.map((rec, index) => (
             <div
               key={index}
               className="p-4 bg-warning/5 rounded-lg border border-warning/20 flex items-start gap-3"

@@ -20,15 +20,83 @@ import LineChart from '../../components/charts/LineChart';
 import WarningCard from '../../components/WarningCard';
 import { useRegion } from '../../context/RegionContext';
 import { useAuth } from '../../context/AuthContext';
-import { nationalKPIData, provinces, warnings, communities, getCitiesByProvince, getCommunitiesByCity } from '../../data/mockData';
+import { nationalKPIData, provinces, communities, getCitiesByProvince, getCommunitiesByCity, getCommunityById } from '../../data/mockData';
 import { formatPercent, formatNumber } from '../../utils/format';
+import { useAppStore } from '../../store';
+import { roleHierarchy } from '../../context/AuthContext';
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { level, provinceId, cityId, provinceName, cityName } = useRegion();
-  const { hasPermission } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const storeWarnings = useAppStore((state) => state.warnings);
+
+  const filteredWarnings = useMemo(() => {
+    if (!user) return storeWarnings;
+
+    if (user.role === 'national' || user.role === 'provincial' || user.role === 'municipal') {
+      return storeWarnings;
+    }
+
+    if (user.role === 'district') {
+      return storeWarnings.filter(w => {
+        const community = getCommunityById(w.communityId);
+        return community?.district === '朝阳区' || community?.district?.includes('朝阳');
+      });
+    }
+
+    if (user.role === 'property') {
+      return storeWarnings.filter(w => w.communityId === user.regionId);
+    }
+
+    return storeWarnings;
+  }, [storeWarnings, user]);
 
   const kpiData = useMemo(() => {
+    if (!user) return nationalKPIData;
+
+    if (user.role === 'district') {
+      const districtCommunities = communities.filter(c => c.district === '朝阳区' || c.district?.includes('朝阳'));
+      const totalUnits = districtCommunities.reduce((sum, c) => sum + c.totalUnits, 0);
+      const avgVacancy = districtCommunities.reduce((sum, c) => sum + c.vacancyRate, 0) / districtCommunities.length;
+      const avgRent = districtCommunities.reduce((sum, c) => sum + c.rentCollectionRate, 0) / districtCommunities.length;
+      const avgEfficiency = districtCommunities.reduce((sum, c) => sum + c.allocationEfficiency, 0) / districtCommunities.length;
+      const avgSatisfaction = districtCommunities.reduce((sum, c) => sum + c.satisfaction, 0) / districtCommunities.length;
+      
+      return {
+        allocationEfficiency: Math.round(avgEfficiency * 10) / 10,
+        allocationEfficiencyChange: 1.5,
+        vacancyRate: Math.round(avgVacancy * 10) / 10,
+        vacancyRateChange: -0.2,
+        rentCollectionRate: Math.round(avgRent * 10) / 10,
+        rentCollectionRateChange: 0.6,
+        satisfaction: Math.round(avgSatisfaction * 10) / 10,
+        satisfactionChange: 0.3,
+        totalCommunities: districtCommunities.length,
+        totalUnits,
+        totalWaiters: Math.floor(totalUnits * 0.42),
+      };
+    }
+
+    if (user.role === 'property') {
+      const community = getCommunityById(user.regionId);
+      if (community) {
+        return {
+          allocationEfficiency: community.allocationEfficiency,
+          allocationEfficiencyChange: 1.2,
+          vacancyRate: community.vacancyRate,
+          vacancyRateChange: -0.1,
+          rentCollectionRate: community.rentCollectionRate,
+          rentCollectionRateChange: 0.5,
+          satisfaction: community.satisfaction,
+          satisfactionChange: 0.4,
+          totalCommunities: 1,
+          totalUnits: community.totalUnits,
+          totalWaiters: Math.floor(community.totalUnits * 0.45),
+        };
+      }
+    }
+
     if (level === 'national') {
       return nationalKPIData;
     }
@@ -70,9 +138,23 @@ export default function Dashboard() {
       }
     }
     return nationalKPIData;
-  }, [level, provinceId, cityId]);
+  }, [level, provinceId, cityId, user]);
 
   const rankingData = useMemo(() => {
+    if (!user) return [];
+    
+    if (user.role === 'district') {
+      const districtCommunities = communities.filter(c => c.district === '朝阳区' || c.district?.includes('朝阳'));
+      return districtCommunities
+        .sort((a, b) => b.vacancyRate - a.vacancyRate)
+        .slice(0, 10)
+        .map(c => ({ name: c.name, value: c.vacancyRate }));
+    }
+
+    if (user.role === 'property') {
+      return [];
+    }
+
     if (level === 'national') {
       return provinces
         .sort((a, b) => b.vacancyRate - a.vacancyRate)
@@ -85,10 +167,30 @@ export default function Dashboard() {
         .slice(0, 10)
         .map(c => ({ name: c.name, value: c.vacancyRate }));
     }
+    if (level === 'city') {
+      return getCommunitiesByCity(cityId || '')
+        .sort((a, b) => b.vacancyRate - a.vacancyRate)
+        .slice(0, 10)
+        .map(c => ({ name: c.name, value: c.vacancyRate }));
+    }
     return [];
-  }, [level, provinceId]);
+  }, [level, provinceId, cityId, user]);
 
   const rentRankingData = useMemo(() => {
+    if (!user) return [];
+
+    if (user.role === 'district') {
+      const districtCommunities = communities.filter(c => c.district === '朝阳区' || c.district?.includes('朝阳'));
+      return districtCommunities
+        .sort((a, b) => a.rentCollectionRate - b.rentCollectionRate)
+        .slice(0, 10)
+        .map(c => ({ name: c.name, value: c.rentCollectionRate }));
+    }
+
+    if (user.role === 'property') {
+      return [];
+    }
+
     if (level === 'national') {
       return provinces
         .sort((a, b) => a.rentCollectionRate - b.rentCollectionRate)
@@ -101,43 +203,76 @@ export default function Dashboard() {
         .slice(0, 10)
         .map(c => ({ name: c.name, value: c.rentCollectionRate }));
     }
+    if (level === 'city') {
+      return getCommunitiesByCity(cityId || '')
+        .sort((a, b) => a.rentCollectionRate - b.rentCollectionRate)
+        .slice(0, 10)
+        .map(c => ({ name: c.name, value: c.rentCollectionRate }));
+    }
     return [];
-  }, [level, provinceId]);
+  }, [level, provinceId, cityId, user]);
 
   const communityList = useMemo(() => {
+    if (!user) return communities.slice(0, 5);
+
+    if (user.role === 'district') {
+      return communities.filter(c => c.district === '朝阳区' || c.district?.includes('朝阳')).slice(0, 5);
+    }
+
+    if (user.role === 'property') {
+      const community = getCommunityById(user.regionId);
+      return community ? [community] : [];
+    }
+
     if (level === 'city') {
       return getCommunitiesByCity(cityId || '').slice(0, 5);
     }
     return communities.slice(0, 5);
-  }, [level, cityId]);
+  }, [level, cityId, user]);
 
-  const activeWarnings = warnings.filter(w => w.status !== 'resolved').slice(0, 4);
-  const level1Count = warnings.filter(w => w.level === 'level1' && w.status !== 'resolved').length;
-  const level2Count = warnings.filter(w => w.level === 'level2' && w.status !== 'resolved').length;
+  const activeWarnings = filteredWarnings.filter(w => w.status !== 'resolved').slice(0, 4);
+  const level1Count = filteredWarnings.filter(w => w.level === 'level1' && w.status !== 'resolved').length;
+  const level2Count = filteredWarnings.filter(w => w.level === 'level2' && w.status !== 'resolved').length;
+  const resolvedCount = filteredWarnings.filter(w => w.status === 'resolved').length;
 
-  const occupancyTrendData = Array.from({ length: 30 }, (_, i) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (29 - i));
-    return {
-      date: `${date.getMonth() + 1}/${date.getDate()}`,
-      value: 85 + Math.sin(i * 0.5) * 3 + Math.random() * 2,
-    };
-  });
+  const occupancyTrendData = useMemo(() => {
+    const baseRate = kpiData.vacancyRate ? 100 - kpiData.vacancyRate : 88;
+    return Array.from({ length: 30 }, (_, i) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (29 - i));
+      return {
+        date: `${date.getMonth() + 1}/${date.getDate()}`,
+        value: Math.max(75, Math.min(98, baseRate + Math.sin(i * 0.5) * 3 + Math.random() * 2)),
+      };
+    });
+  }, [kpiData.vacancyRate]);
 
-  const complaintTypeData = [
-    { name: '设施维修', value: 35, color: '#1E88E5' },
-    { name: '环境卫生', value: 25, color: '#43A047' },
-    { name: '安全保卫', value: 18, color: '#FB8C00' },
-    { name: '噪音扰民', value: 12, color: '#E53935' },
-    { name: '服务态度', value: 10, color: '#8E24AA' },
-  ];
+  const complaintTypeData = useMemo(() => {
+    const baseCount = kpiData.totalCommunities * 30;
+    return [
+      { name: '设施维修', value: Math.round(baseCount * 0.3), color: '#1E88E5' },
+      { name: '环境卫生', value: Math.round(baseCount * 0.25), color: '#43A047' },
+      { name: '安全保卫', value: Math.round(baseCount * 0.2), color: '#FB8C00' },
+      { name: '噪音扰民', value: Math.round(baseCount * 0.12), color: '#E53935' },
+      { name: '服务态度', value: Math.round(baseCount * 0.13), color: '#8E24AA' },
+    ];
+  }, [kpiData.totalCommunities]);
 
   const getPageTitle = () => {
+    if (user?.role === 'district') {
+      return `${user.regionName}保障性住房运营监测`;
+    }
+    if (user?.role === 'property') {
+      return `${user.regionName}运营监测`;
+    }
     if (level === 'national') return '全国保障性住房运营监测';
     if (level === 'province') return `${provinceName}保障性住房运营监测`;
     if (level === 'city') return `${cityName}保障性住房运营监测`;
     return '保障性住房运营监测';
   };
+
+  const showHeatMap = hasPermission(['national', 'provincial']);
+  const showCommunityList = hasPermission(['national', 'provincial', 'municipal', 'district']) && communityList.length > 0;
 
   return (
     <div className="space-y-6 fade-in-up">
@@ -219,20 +354,35 @@ export default function Dashboard() {
         </div>
         <div className="glass-card p-5 col-span-1">
           <div className="text-dark-400 text-sm mb-2">本周新增投诉</div>
-          <div className="text-2xl font-bold text-cyan-400">1,268</div>
+          <div className="text-2xl font-bold text-cyan-400">{formatNumber(Math.floor(kpiData.totalCommunities * 6.3))}</div>
           <div className="text-xs text-dark-500 mt-1">件</div>
         </div>
       </div>
 
       <div className="grid grid-cols-12 gap-5">
-        <div className="col-span-7">
-          <ChinaHeatMap />
-        </div>
+        {showHeatMap ? (
+          <div className="col-span-7">
+            <ChinaHeatMap />
+          </div>
+        ) : (
+          <div className="col-span-7">
+            <div className="glass-card p-5 h-full">
+              <h3 className="section-title mb-4">小区空置率排名</h3>
+              <BarChart
+                data={rankingData}
+                height={350}
+                unit="%"
+                horizontal
+                color="#FB8C00"
+              />
+            </div>
+          </div>
+        )}
 
         <div className="col-span-5 space-y-5">
           <div className="glass-card p-5">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="section-title mb-0">空置率排名 TOP10</h3>
+              <h3 className="section-title mb-0">{showHeatMap ? '空置率排名 TOP10' : '租金收缴率排名'}</h3>
               <button
                 className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1"
                 onClick={() => navigate('/warnings')}
@@ -241,7 +391,7 @@ export default function Dashboard() {
               </button>
             </div>
             <BarChart
-              data={rankingData}
+              data={showHeatMap ? rankingData : rentRankingData}
               height={280}
               unit="%"
               horizontal
@@ -327,9 +477,9 @@ export default function Dashboard() {
               <div className="p-3 bg-success/10 rounded-lg border border-success/30">
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-green-400 font-medium">已解除</span>
-                  <span className="text-xl font-bold text-green-400">12</span>
+                  <span className="text-xl font-bold text-green-400">{resolvedCount}</span>
                 </div>
-                <div className="text-xs text-dark-400 mt-1">本月累计</div>
+                <div className="text-xs text-dark-400 mt-1">累计处理</div>
               </div>
               <button
                 className="w-full mt-2 btn btn-primary justify-center text-sm"
@@ -356,39 +506,48 @@ export default function Dashboard() {
               </button>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              {activeWarnings.map(warning => (
-                <WarningCard key={warning.id} warning={warning} />
-              ))}
+              {activeWarnings.length > 0 ? (
+                activeWarnings.map(warning => (
+                  <WarningCard key={warning.id} warning={warning} />
+                ))
+              ) : (
+                <div className="col-span-2 py-8 text-center text-dark-400">
+                  <AlertTriangle className="w-10 h-10 mx-auto mb-2 text-green-400" />
+                  暂无待处理预警
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        <div className="col-span-4">
-          <div className="glass-card p-5 h-full">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="section-title mb-0">小区列表</h3>
-              <Building2 className="w-5 h-5 text-primary-400" />
-            </div>
-            <div className="space-y-2">
-              {communityList.map(community => (
-                <div
-                  key={community.id}
-                  className="p-3 rounded-lg bg-dark-800/50 hover:bg-dark-700/50 cursor-pointer transition-colors flex items-center justify-between group"
-                  onClick={() => navigate(`/community/${community.id}`)}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-white truncate">{community.name}</div>
-                    <div className="text-xs text-dark-400 mt-0.5">{community.district} · {community.totalUnits}套</div>
+        {showCommunityList && (
+          <div className="col-span-4">
+            <div className="glass-card p-5 h-full">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="section-title mb-0">小区列表</h3>
+                <Building2 className="w-5 h-5 text-primary-400" />
+              </div>
+              <div className="space-y-2">
+                {communityList.map(community => (
+                  <div
+                    key={community.id}
+                    className="p-3 rounded-lg bg-dark-800/50 hover:bg-dark-700/50 cursor-pointer transition-colors flex items-center justify-between group"
+                    onClick={() => navigate(`/community/${community.id}`)}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-white truncate">{community.name}</div>
+                      <div className="text-xs text-dark-400 mt-0.5">{community.district} · {community.totalUnits}套</div>
+                    </div>
+                    <div className="text-right ml-3">
+                      <div className="text-sm font-medium text-primary-400">{formatPercent(community.vacancyRate)}</div>
+                      <div className="text-xs text-dark-500">空置率</div>
+                    </div>
                   </div>
-                  <div className="text-right ml-3">
-                    <div className="text-sm font-medium text-primary-400">{formatPercent(community.vacancyRate)}</div>
-                    <div className="text-xs text-dark-500">空置率</div>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

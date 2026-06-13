@@ -14,19 +14,29 @@ import {
   TrendingDown,
   Home,
   DollarSign,
+  Send,
 } from 'lucide-react';
-import { useState } from 'react';
-import { getWarningById, getCommunityById } from '../../data/mockData';
+import { useState, useMemo } from 'react';
+import { getCommunityById } from '../../data/mockData';
 import { getWarningLevelName, getWarningTypeName, getWarningStatusName, formatPercent, formatDate, cn } from '../../utils/format';
 import LineChart from '../../components/charts/LineChart';
-import { useMemo } from 'react';
+import { useAppStore } from '../../store';
+import { useAuth } from '../../context/AuthContext';
 
 export default function WarningDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const warning = getWarningById(id || '');
+  const { user } = useAuth();
+  const warnings = useAppStore((state) => state.warnings);
+  const approveWarning = useAppStore((state) => state.approveWarning);
+  const rejectWarning = useAppStore((state) => state.rejectWarning);
+  const resolveWarning = useAppStore((state) => state.resolveWarning);
+  const markWarningProcessing = useAppStore((state) => state.markWarningProcessing);
+  
+  const warning = warnings.find((w) => w.id === id);
   const community = warning ? getCommunityById(warning.communityId) : undefined;
   const [approvalOpinion, setApprovalOpinion] = useState('');
+  const [processingReport, setProcessingReport] = useState('');
 
   const trendData = useMemo(() => {
     if (!warning) return [];
@@ -68,6 +78,58 @@ export default function WarningDetail() {
   ];
 
   const getApprovalHistory = warning.approvalHistory || [];
+
+  const handleApprove = () => {
+    if (!warning.approvalStage || !approvalOpinion.trim()) return;
+    const handlerNames: Record<string, string> = {
+      property: '物业负责人',
+      district: '区中心主任',
+      municipal: '市住建局局长',
+    };
+    approveWarning(
+      warning.id,
+      warning.approvalStage,
+      approvalOpinion,
+      user?.name || handlerNames[user?.role || ''] || '审批人'
+    );
+    setApprovalOpinion('');
+  };
+
+  const handleReject = () => {
+    if (!warning.approvalStage || !approvalOpinion.trim()) return;
+    const handlerNames: Record<string, string> = {
+      property: '物业负责人',
+      district: '区中心主任',
+      municipal: '市住建局局长',
+    };
+    rejectWarning(
+      warning.id,
+      warning.approvalStage,
+      approvalOpinion,
+      user?.name || handlerNames[user?.role || ''] || '审批人'
+    );
+    setApprovalOpinion('');
+  };
+
+  const handleMarkResolved = () => {
+    if (!processingReport.trim()) return;
+    resolveWarning(warning.id, processingReport);
+    setProcessingReport('');
+  };
+
+  const handleMarkProcessing = () => {
+    markWarningProcessing(warning.id);
+  };
+
+  const canHandleApproval = (stage: number) => {
+    if (!user || warning.status === 'resolved') return false;
+    if (warning.approvalStage !== stage) return false;
+    
+    if (stage === 1 && (user.role === 'property' || user.role === 'district' || user.role === 'municipal')) return true;
+    if (stage === 2 && (user.role === 'district' || user.role === 'municipal')) return true;
+    if (stage === 3 && user.role === 'municipal') return true;
+    return false;
+  };
 
   return (
     <div className="space-y-6 fade-in-up">
@@ -174,7 +236,7 @@ export default function WarningDetail() {
 
           <div className="glass-card p-5">
             <h3 className="section-title">预警描述</h3>
-            <p className="text-dark-300 text-sm leading-relaxed">
+            <p className="text-dark-300 text-sm leading-relaxed whitespace-pre-wrap">
               {warning.description}
             </p>
             <div className="mt-4 p-4 bg-dark-800/50 rounded-lg border border-dark-700">
@@ -237,8 +299,9 @@ export default function WarningDetail() {
             {statusSteps.map((step, index) => {
               const historyItem = getApprovalHistory[index];
               const isCompleted = historyItem?.status === 'approved';
-              const isCurrent = historyItem?.status === 'pending';
-              const isPending = !historyItem;
+              const isRejected = historyItem?.status === 'rejected';
+              const isCurrent = historyItem?.status === 'pending' && warning.approvalStage === step.stage;
+              const isPending = !historyItem || (historyItem.status === 'pending' && warning.approvalStage !== step.stage);
 
               return (
                 <div key={step.stage} className="flex-1">
@@ -246,6 +309,7 @@ export default function WarningDetail() {
                     className={cn(
                       'p-4 rounded-xl border-2 transition-all',
                       isCompleted && 'border-success bg-success/10',
+                      isRejected && 'border-danger bg-danger/10',
                       isCurrent && 'border-primary-500 bg-primary-500/10 animate-pulse',
                       isPending && 'border-dark-700 bg-dark-800/50'
                     )}
@@ -255,11 +319,12 @@ export default function WarningDetail() {
                         className={cn(
                           'w-10 h-10 rounded-full flex items-center justify-center text-white font-bold',
                           isCompleted && 'bg-success',
+                          isRejected && 'bg-danger',
                           isCurrent && 'bg-gradient-primary',
                           isPending && 'bg-dark-700 text-dark-400'
                         )}
                       >
-                        {isCompleted ? <CheckCircle className="w-5 h-5" /> : step.stage}
+                        {isCompleted ? <CheckCircle className="w-5 h-5" /> : isRejected ? <XCircle className="w-5 h-5" /> : step.stage}
                       </div>
                       <div>
                         <div className={cn('font-medium', isPending ? 'text-dark-400' : 'text-white')}>
@@ -289,7 +354,7 @@ export default function WarningDetail() {
                       </div>
                     )}
 
-                    {isPending && (
+                    {isPending && !historyItem && (
                       <div className="text-xs text-dark-500 flex items-center gap-1">
                         <Clock3 className="w-3 h-3" />
                         预计 {step.days}
@@ -301,10 +366,10 @@ export default function WarningDetail() {
             })}
           </div>
 
-          {warning.approvalStage !== undefined && warning.approvalStage < 3 && (
+          {warning.approvalStage !== undefined && warning.approvalStage < 4 && warning.status !== 'resolved' && canHandleApproval(warning.approvalStage) && (
             <div className="mt-6 pt-5 border-t border-dark-700">
               <div className="text-sm font-medium text-white mb-3">
-                当前阶段：{statusSteps[warning.approvalStage]?.name || '审批中'}
+                当前阶段：{statusSteps[warning.approvalStage - 1]?.name || '审批中'}
               </div>
               <textarea
                 value={approvalOpinion}
@@ -313,11 +378,11 @@ export default function WarningDetail() {
                 className="w-full h-24 p-3 bg-dark-800 border border-dark-600 rounded-lg text-sm text-white placeholder-dark-500 focus:outline-none focus:border-primary-500 resize-none"
               />
               <div className="flex justify-end gap-3 mt-3">
-                <button className="btn btn-secondary">
+                <button className="btn btn-secondary" onClick={handleReject}>
                   <XCircle className="w-4 h-4" />
                   驳回
                 </button>
-                <button className="btn btn-primary">
+                <button className="btn btn-primary" onClick={handleApprove}>
                   <ThumbsUp className="w-4 h-4" />
                   通过
                 </button>
@@ -333,29 +398,54 @@ export default function WarningDetail() {
           <p className="text-dark-400 text-sm mb-4">
             一级预警请物业和区住房保障中心需在15天内采取措施进行整改。如15天内未改善，将自动升级为二级预警并启动三级审批流程。
           </p>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="p-4 bg-dark-800/50 rounded-lg border border-dark-700">
-              <div className="text-sm font-medium text-white mb-2">已采取措施</div>
-              <ul className="text-sm text-dark-300 space-y-1">
-                <li>• 加强宣传推广</li>
-                <li>• 优化申请流程</li>
-                <li>• 提高服务质量</li>
-              </ul>
+          
+          {warning.status !== 'resolved' ? (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 bg-dark-800/50 rounded-lg border border-dark-700">
+                  <div className="text-sm font-medium text-white mb-2">已采取措施</div>
+                  <ul className="text-sm text-dark-300 space-y-1">
+                    <li>• 加强宣传推广</li>
+                    <li>• 优化申请流程</li>
+                    <li>• 提高服务质量</li>
+                  </ul>
+                </div>
+                <div className="p-4 bg-dark-800/50 rounded-lg border border-dark-700">
+                  <div className="text-sm font-medium text-white mb-2">预计改善时间</div>
+                  <div className="text-2xl font-bold text-primary-400">7天</div>
+                  <div className="text-xs text-dark-400 mt-1">预计达到正常水平</div>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <div className="text-sm font-medium text-white mb-2">提交处理报告</div>
+                <textarea
+                  value={processingReport}
+                  onChange={e => setProcessingReport(e.target.value)}
+                  placeholder="请描述已采取的处理措施和整改效果..."
+                  className="w-full h-20 p-3 bg-dark-800 border border-dark-600 rounded-lg text-sm text-white placeholder-dark-500 focus:outline-none focus:border-primary-500 resize-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 mt-4">
+                {warning.status === 'active' && (
+                  <button className="btn btn-secondary" onClick={handleMarkProcessing}>
+                    标记为处理中
+                  </button>
+                )}
+                <button className="btn btn-primary" onClick={handleMarkResolved}>
+                  <Send className="w-4 h-4" />
+                  提交处理报告并解除
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="p-6 bg-success/10 rounded-lg border border-success/30 text-center">
+              <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-3" />
+              <div className="text-lg font-medium text-white">预警已解除</div>
+              <div className="text-sm text-dark-400 mt-1">该预警已处理完成，运营恢复正常</div>
             </div>
-            <div className="p-4 bg-dark-800/50 rounded-lg border border-dark-700">
-              <div className="text-sm font-medium text-white mb-2">预计改善时间</div>
-              <div className="text-2xl font-bold text-primary-400">7天</div>
-              <div className="text-xs text-dark-400 mt-1">预计达到正常水平</div>
-            </div>
-          </div>
-          <div className="flex justify-end gap-3 mt-4">
-            <button className="btn btn-secondary">
-              标记为已处理
-            </button>
-            <button className="btn btn-primary">
-              提交处理报告
-            </button>
-          </div>
+          )}
         </div>
       )}
     </div>

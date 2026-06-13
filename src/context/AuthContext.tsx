@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import type { User, UserRole } from '../types';
+import { useAppStore } from '../store';
 
 interface AuthContextType {
   user: User | null;
@@ -10,7 +11,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const roleHierarchy: Record<UserRole, number> = {
+export const roleHierarchy: Record<UserRole, number> = {
   national: 5,
   provincial: 4,
   municipal: 3,
@@ -62,9 +63,18 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(mockUsers.municipal);
+  const setCurrentRole = useAppStore((state) => state.setCurrentRole);
+  const storedRole = useAppStore((state) => state.currentRole);
+
+  useEffect(() => {
+    if (storedRole && mockUsers[storedRole]) {
+      setUser(mockUsers[storedRole]);
+    }
+  }, [storedRole]);
 
   const login = (role: UserRole) => {
     setUser(mockUsers[role]);
+    setCurrentRole(role);
   };
 
   const logout = () => {

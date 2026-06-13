@@ -15,7 +15,8 @@ import {
   ChevronRight,
   FileText,
 } from 'lucide-react';
-import { getCommunityById, getCommunityOccupancyTrend, getCommunityComplaints, getCommunityRentRecords, warnings } from '../../data/mockData';
+import { getCommunityById, getCommunity7DayOccupancyTrend, getCommunityComplaints, getCommunityRentRecords } from '../../data/mockData';
+import { useAppStore } from '../../store';
 import KpiCard from '../../components/KpiCard';
 import LineChart from '../../components/charts/LineChart';
 import PieChart from '../../components/charts/PieChart';
@@ -33,7 +34,7 @@ export default function CommunityDetail() {
 
   const occupancyTrend = useMemo(() => {
     if (!community) return [];
-    return getCommunityOccupancyTrend(community.id).map(d => ({
+    return getCommunity7DayOccupancyTrend(community.id).map(d => ({
       date: d.date.substring(5),
       value: d.occupancyRate,
       name: '入住率',
@@ -50,9 +51,11 @@ export default function CommunityDetail() {
     return getCommunityRentRecords(community.id);
   }, [community]);
 
+  const warnings = useAppStore((state) => state.warnings);
+
   const communityWarnings = useMemo(() => {
     return warnings.filter(w => w.communityId === id && w.status !== 'resolved');
-  }, [id]);
+  }, [warnings, id]);
 
   const complaintTypeData = useMemo(() => {
     const typeMap: Record<string, number> = {};
@@ -219,7 +222,7 @@ export default function CommunityDetail() {
 
           <div className="grid grid-cols-12 gap-5">
             <div className="col-span-7 glass-card p-5">
-              <h3 className="section-title">近30天入住率趋势</h3>
+              <h3 className="section-title">近7天入住趋势</h3>
               <LineChart
                 data={occupancyTrend}
                 height={300}

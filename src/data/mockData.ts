@@ -146,19 +146,33 @@ export const nationalKPIData: KPIData = {
   totalWaiters: 325680,
 };
 
-function generateOccupancyTrend(days: number): OccupancyTrend[] {
+function seededRandom(seed: string): () => number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    const char = seed.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return function() {
+    hash = Math.sin(hash) * 10000;
+    return hash - Math.floor(hash);
+  };
+}
+
+function generateOccupancyTrend(communityId: string, days: number): OccupancyTrend[] {
   const data: OccupancyTrend[] = [];
   const today = new Date();
-  let baseRate = 85 + Math.random() * 10;
-  let baseUnits = 800 + Math.floor(Math.random() * 500);
+  const random = seededRandom(communityId + '-occupancy');
+  let baseRate = 82 + random() * 12;
+  let baseUnits = 600 + Math.floor(random() * 600);
 
   for (let i = days - 1; i >= 0; i--) {
     const date = new Date(today);
     date.setDate(date.getDate() - i);
-    baseRate += (Math.random() - 0.45) * 2;
+    baseRate += (random() - 0.45) * 1.5;
     baseRate = Math.max(75, Math.min(95, baseRate));
-    baseUnits += Math.floor((Math.random() - 0.45) * 20);
-    baseUnits = Math.max(600, Math.min(1200, baseUnits));
+    baseUnits += Math.floor((random() - 0.45) * 15);
+    baseUnits = Math.max(400, Math.min(1500, baseUnits));
 
     data.push({
       date: date.toISOString().split('T')[0],
@@ -170,8 +184,12 @@ function generateOccupancyTrend(days: number): OccupancyTrend[] {
   return data;
 }
 
-export const getCommunityOccupancyTrend = (communityId: string): OccupancyTrend[] => {
-  return generateOccupancyTrend(30);
+export const getCommunityOccupancyTrend = (communityId: string, days: number = 30): OccupancyTrend[] => {
+  return generateOccupancyTrend(communityId, days);
+};
+
+export const getCommunity7DayOccupancyTrend = (communityId: string): OccupancyTrend[] => {
+  return generateOccupancyTrend(communityId, 7);
 };
 
 function generateComplaints(communityId: string, count: number): Complaint[] {
@@ -186,24 +204,25 @@ function generateComplaints(communityId: string, count: number): Complaint[] {
 
   const complaints: Complaint[] = [];
   const statuses: ('pending' | 'processing' | 'resolved')[] = ['pending', 'processing', 'resolved'];
+  const random = seededRandom(communityId + '-complaints');
 
   for (let i = 0; i < count; i++) {
-    const typeData = types[Math.floor(Math.random() * types.length)];
-    const status = statuses[Math.floor(Math.random() * statuses.length)];
+    const typeData = types[Math.floor(random() * types.length)];
+    const status = statuses[Math.floor(random() * statuses.length)];
     const createDate = new Date();
-    createDate.setDate(createDate.getDate() - Math.floor(Math.random() * 30));
+    createDate.setDate(createDate.getDate() - Math.floor(random() * 30));
 
     complaints.push({
       id: `complaint-${communityId}-${i}`,
       communityId,
       type: typeData.type,
-      title: typeData.titles[Math.floor(Math.random() * typeData.titles.length)],
+      title: typeData.titles[Math.floor(random() * typeData.titles.length)],
       content: '这是一条模拟的投诉内容，描述了住户遇到的具体问题和诉求。',
       status,
       createDate: createDate.toISOString().split('T')[0],
-      resolveDate: status === 'resolved' ? new Date(createDate.getTime() + Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : undefined,
-      residentName: `住户${Math.floor(Math.random() * 1000)}`,
-      unitNumber: `${Math.floor(Math.random() * 20) + 1}号楼${Math.floor(Math.random() * 30) + 1}0${Math.floor(Math.random() * 9) + 1}`,
+      resolveDate: status === 'resolved' ? new Date(createDate.getTime() + random() * 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : undefined,
+      residentName: `住户${Math.floor(random() * 1000)}`,
+      unitNumber: `${Math.floor(random() * 20) + 1}号楼${Math.floor(random() * 30) + 1}0${Math.floor(random() * 9) + 1}`,
     });
   }
 
@@ -211,21 +230,24 @@ function generateComplaints(communityId: string, count: number): Complaint[] {
 }
 
 export const getCommunityComplaints = (communityId: string): Complaint[] => {
-  return generateComplaints(communityId, 35);
+  const random = seededRandom(communityId + '-complaint-count');
+  const count = 20 + Math.floor(random() * 30);
+  return generateComplaints(communityId, count);
 };
 
 function generateRentRecords(communityId: string, months: number): RentRecord[] {
   const records: RentRecord[] = [];
   const today = new Date();
-  let baseRate = 85 + Math.random() * 10;
-  let baseShould = 150000 + Math.random() * 100000;
+  const random = seededRandom(communityId + '-rent');
+  let baseRate = 82 + random() * 12;
+  let baseShould = 120000 + random() * 120000;
 
   for (let i = months - 1; i >= 0; i--) {
     const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
-    baseRate += (Math.random() - 0.45) * 3;
+    baseRate += (random() - 0.45) * 2.5;
     baseRate = Math.max(75, Math.min(98, baseRate));
-    baseShould += (Math.random() - 0.5) * 5000;
-    baseShould = Math.max(100000, Math.min(300000, baseShould));
+    baseShould += (random() - 0.5) * 4000;
+    baseShould = Math.max(80000, Math.min(350000, baseShould));
 
     const actual = baseShould * baseRate / 100;
     const arrearsCount = Math.floor((100 - baseRate) * 2);
@@ -405,3 +427,97 @@ export const getCommunityById = (id: string): Community | undefined => {
 export const getWarningById = (id: string): Warning | undefined => {
   return warnings.find(w => w.id === id);
 };
+
+export function generateReportsForCommunities(communityIds: string[], scopeName: string): WeeklyReport[] {
+  const reports: WeeklyReport[] = [];
+  const today = new Date();
+  const seed = communityIds.join(',');
+  const random = seededRandom(seed + '-reports');
+
+  const scopeCommunities = communities.filter(c => communityIds.includes(c.id));
+  const hasCommunities = scopeCommunities.length > 0;
+
+  const baseVacancyRate = hasCommunities
+    ? scopeCommunities.reduce((sum, c) => sum + c.vacancyRate, 0) / scopeCommunities.length
+    : 8.5;
+  const baseRentRate = hasCommunities
+    ? scopeCommunities.reduce((sum, c) => sum + c.rentCollectionRate, 0) / scopeCommunities.length
+    : 88;
+  const baseSatisfaction = hasCommunities
+    ? scopeCommunities.reduce((sum, c) => sum + c.satisfaction, 0) / scopeCommunities.length
+    : 82;
+
+  for (let i = 0; i < 12; i++) {
+    const endDate = new Date(today);
+    endDate.setDate(endDate.getDate() - i * 7);
+    const startDate = new Date(endDate);
+    startDate.setDate(startDate.getDate() - 6);
+
+    const weekNumber = Math.ceil((endDate.getTime() - new Date(endDate.getFullYear(), 0, 1).getTime()) / (7 * 24 * 60 * 60 * 1000));
+
+    const vacancyVariation = (random() - 0.5) * 2;
+    const rentVariation = (random() - 0.5) * 3;
+    const satisfactionVariation = (random() - 0.5) * 2;
+
+    reports.push({
+      id: `report-${scopeName}-${i}`,
+      weekNumber,
+      year: endDate.getFullYear(),
+      startDate: startDate.toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0],
+      vacancyRate: Math.round((baseVacancyRate + vacancyVariation + i * 0.05) * 10) / 10,
+      vacancyRateYoY: Math.round((-2 + random() * 1.5) * 10) / 10,
+      vacancyRateMoM: Math.round((-0.2 + random() * 0.4) * 10) / 10,
+      avgWaitDays: Math.round(75 + random() * 25 - i * 1.5),
+      avgWaitDaysYoY: Math.round((-10 + random() * 5) * 10) / 10,
+      avgWaitDaysMoM: Math.round((-2.5 + random() * 2) * 10) / 10,
+      rentCollectionRate: Math.round((baseRentRate + rentVariation - i * 0.15) * 10) / 10,
+      rentCollectionRateYoY: Math.round((2.5 + random() * 1.5) * 10) / 10,
+      rentCollectionRateMoM: Math.round((0.5 + random() * 0.4) * 10) / 10,
+      satisfaction: Math.round((baseSatisfaction + satisfactionVariation) * 10) / 10,
+      satisfactionYoY: Math.round((1.5 + random() * 1) * 10) / 10,
+      satisfactionMoM: Math.round((0.3 + random() * 0.3) * 10) / 10,
+      suggestions: [
+        `建议优化${scopeName}轮候排序算法，提高匹配效率`,
+        `加强对${scopeName}空置率较高小区的宣传推广`,
+        `完善${scopeName}租金催收机制，提高收缴率`,
+        `增加${scopeName}小区配套设施，提升住户满意度`,
+      ],
+      evictionPlan: hasCommunities
+        ? scopeCommunities.slice(0, 3).map((c, idx) => ({
+            communityName: c.name,
+            reason: idx === 0 ? '长期空置且无人申请' : idx === 1 ? '租金拖欠超6个月' : '违规转租',
+            count: Math.floor(5 + random() * 20),
+            priority: idx === 0 ? 'high' : idx === 1 ? 'high' : 'medium' as 'high' | 'medium' | 'low',
+          }))
+        : [
+            { communityName: '示例小区A', reason: '长期空置且无人申请', count: 15, priority: 'high' },
+            { communityName: '示例小区B', reason: '租金拖欠超6个月', count: 8, priority: 'high' },
+          ],
+    });
+  }
+
+  return reports;
+}
+
+export function getDistrictCommunities(districtName: string): Community[] {
+  return communities.filter(c => c.district === districtName);
+}
+
+export function getReportsByRole(role: string, regionId: string): WeeklyReport[] {
+  if (role === 'national' || role === 'provincial' || role === 'municipal') {
+    return weeklyReports;
+  }
+
+  if (role === 'district') {
+    const districtCommunities = communities.filter(c => c.district === '朝阳区');
+    const districtCommunityIds = districtCommunities.map(c => c.id);
+    return generateReportsForCommunities(districtCommunityIds, '朝阳区');
+  }
+
+  if (role === 'property') {
+    return generateReportsForCommunities([regionId], '小区');
+  }
+
+  return weeklyReports;
+}

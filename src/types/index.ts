@@ -144,6 +144,8 @@ export interface RegionContextType {
   setProvince: (id: string, name: string) => void;
   setCity: (id: string, name: string) => void;
   resetToNational: () => void;
+  canSwitchToNational?: boolean;
+  canSwitchToProvince?: boolean;
 }
 
 export interface WeeklyReport {
